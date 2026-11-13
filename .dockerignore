@@ -1,0 +1,12 @@
+.git
+.env
+.claude
+data
+hello.py
+**/__pycache__
+**/.pytest_cache
+backend/.venv
+backend/tests
+frontend/node_modules
+frontend/dist
+docs

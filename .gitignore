@@ -1,0 +1,24 @@
+# Secrets and local config
+.env
+
+# Unrelated local script (contains a token)
+hello.py
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# SQLite data
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
