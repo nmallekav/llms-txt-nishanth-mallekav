@@ -1,9 +1,10 @@
-"""Scheduled ETag checks and automatic re-crawls. Design: docs/monitoring.md.
+"""Keeps monitored sites up to date. Design: docs/monitoring.md.
 
-Every site in the database is checked on a configurable interval. The check sends
-conditional requests (If-None-Match / If-Modified-Since) for the homepage, sitemaps and
-listed pages. Any change triggers a full re-crawl, and a new version is stored only if
-the generated llms.txt differs from the current one.
+Every few minutes the scheduler picks the sites that are due (about once a day each) and:
+1. Asks the site whether anything changed, using cheap conditional requests
+   (If-None-Match / If-Modified-Since) for the homepage, sitemaps and pages.
+2. If something changed, re-crawls the site.
+3. Saves a new version only if the generated llms.txt is different.
 """
 
 import asyncio
@@ -19,18 +20,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import Settings, get_settings
-from .crawler import CrawlError, CrawlResult, Page, crawl, make_client
-from .db import CheckRun, PageRow, SessionLocal, Site, SitemapRow, SiteVersion, utcnow
+from .crawler import CrawlError, CrawlResult, Page, crawl
+from .fetcher import make_client
+from .db import PageRow, SessionLocal, Site, SiteVersion, utcnow
 from .generate import render
 
 log = logging.getLogger(__name__)
-
-_in_progress: set[str] = set()
 
 
 # ---------- storing crawls ----------
 
 def fingerprint(page) -> str:
+    """Identifies a page's llms.txt entry, for change summaries. Works on a Page or a PageRow."""
     raw = "\x1f".join([page.url, page.title or "", page.description or "", page.md_url or ""])
     return hashlib.sha256(raw.encode()).hexdigest()
 
@@ -41,31 +42,30 @@ def content_hash(text: str) -> str:
 
 def _page_from_row(row: PageRow) -> Page:
     return Page(url=row.url, title=row.title, description=row.description, section=row.section,
-                score=row.score, depth=0, md_url=row.md_url, etag=row.etag,
-                last_modified=row.last_modified, status=row.http_status or 200,
+                score=row.score, md_url=row.md_url, etag=row.etag, last_modified=row.last_modified,
                 alt_descriptions=list(row.alt_descriptions or []))
 
 
 def change_summary(old: dict[str, str], new: dict[str, str]) -> str:
-    """Describe the difference between two {url: fingerprint} maps."""
+    """Describe the difference between two {url: fingerprint} maps, e.g. "+2 pages, 1 page updated"."""
+    def pages(n: int) -> str:
+        return f"{n} page" if n == 1 else f"{n} pages"
+
     added = len(new.keys() - old.keys())
     removed = len(old.keys() - new.keys())
     updated = sum(1 for url in new.keys() & old.keys() if new[url] != old[url])
     parts = []
     if added:
-        parts.append(f"+{added} page{'s' if added != 1 else ''}")
+        parts.append(f"+{pages(added)}")
     if removed:
-        parts.append(f"−{removed} page{'s' if removed != 1 else ''}")
+        parts.append(f"−{pages(removed)}")
     if updated:
-        parts.append(f"{updated} page{'s' if updated != 1 else ''} updated")
+        parts.append(f"{pages(updated)} updated")
     return ", ".join(parts) or "Site details or ordering changed"
 
 
 def save_crawl(session: Session, site: Site, result: CrawlResult, settings: Settings) -> tuple[bool, str | None]:
-    """Store a crawl's pages and sitemaps; add a new version if the llms.txt changed.
-
-    Returns (changed, change_summary).
-    """
+    """Save a crawl's results; add a new version if the llms.txt changed. Returns (changed, summary)."""
     old_rows = {row.url: row for row in site.pages}
     pages = list(result.pages)
 
@@ -79,6 +79,7 @@ def save_crawl(session: Session, site: Site, result: CrawlResult, settings: Sett
     digest = content_hash(text)
     now = utcnow()
 
+    # Site details and validators for the next check.
     site.name = result.site_name
     site.summary = result.summary
     site.homepage_url = result.homepage_url
@@ -86,22 +87,21 @@ def save_crawl(session: Session, site: Site, result: CrawlResult, settings: Sett
     site.homepage_last_modified = result.homepage_last_modified
     site.scope_path = result.scope_path
     site.last_crawled_at = now
+    site.sitemaps = [{"url": s.url, "etag": s.etag, "last_modified": s.last_modified} for s in result.sitemaps]
 
-    # Replace pages and sitemaps (delete first so the (site_id, url) unique constraints hold).
-    for row in list(site.pages) + list(site.sitemaps):
+    # Replace pages (delete first so the (site_id, url) unique constraint holds).
+    for row in list(site.pages):
         session.delete(row)
     session.flush()
-    session.expire(site, ["pages", "sitemaps"])
+    session.expire(site, ["pages"])
     for p in pages:
         session.add(PageRow(
             site_id=site.id, url=p.url, title=p.title, description=p.description,
             alt_descriptions=p.alt_descriptions, md_url=p.md_url, section=p.section, score=p.score,
-            fingerprint=fingerprint(p), etag=p.etag, last_modified=p.last_modified,
-            http_status=p.status, last_fetched_at=now,
+            etag=p.etag, last_modified=p.last_modified,
         ))
-    for s in result.sitemaps:
-        session.add(SitemapRow(site_id=site.id, url=s.url, etag=s.etag, last_modified=s.last_modified))
 
+    # New version, unless the file came out exactly the same.
     current = site.current_version
     if current is not None and current.content_hash == digest:
         return False, None
@@ -109,7 +109,7 @@ def save_crawl(session: Session, site: Site, result: CrawlResult, settings: Sett
     if current is None:
         summary = f"Initial version ({len(pages)} pages)"
     else:
-        summary = change_summary({u: r.fingerprint for u, r in old_rows.items()}, {p.url: fingerprint(p) for p in pages})
+        summary = change_summary({u: fingerprint(r) for u, r in old_rows.items()}, {p.url: fingerprint(p) for p in pages})
     version = SiteVersion(site_id=site.id, llms_txt=text, content_hash=digest, page_count=len(pages),
                           change_summary=summary, created_at=now)
     session.add(version)
@@ -123,16 +123,12 @@ def store_site(session: Session, result: CrawlResult, settings: Settings | None 
     """Start monitoring a freshly crawled site (or refresh it if it's already stored)."""
     settings = settings or get_settings()
     site = session.scalar(select(Site).where(Site.url == result.start_url))
-    trigger = "manual" if site else "initial"
     if site is None:
         site = Site(url=result.start_url)
         session.add(site)
         session.flush()
-    changed, summary = save_crawl(session, site, result, settings)
+    save_crawl(session, site, result, settings)
     _mark_success(site, settings)
-    session.add(CheckRun(site_id=site.id, kind="crawl", trigger=trigger,
-                         result="changed" if changed else "unchanged", reason=summary,
-                         pages_fetched=len(result.pages), finished_at=utcnow()))
     session.commit()
     return site
 
@@ -195,9 +191,9 @@ async def _check_one(t: _Target, settings: Settings, client: httpx.AsyncClient) 
 
 def _targets(site: Site) -> list[_Target]:
     targets = [_Target(site.homepage_url or site.url, site.homepage_etag, site.homepage_last_modified)]
-    targets += [_Target(s.url, s.etag, s.last_modified) for s in site.sitemaps]
+    targets += [_Target(s["url"], s.get("etag"), s.get("last_modified")) for s in site.sitemaps or []]
     targets += [_Target(p.url, p.etag, p.last_modified) for p in site.pages
-                if p.selected and p.url != site.homepage_url]
+                if p.url != site.homepage_url]
     return targets
 
 
@@ -225,70 +221,56 @@ def _mark_failure(site: Site, error: str, settings: Settings) -> None:
         site.next_check_at = now + timedelta(hours=settings.monitor_retry_hours)
 
 
-async def process_site(site_id: str, force: bool = False, manual: bool = False,
+async def process_site(site_id: str, force: bool = False,
                        settings: Settings | None = None, client: httpx.AsyncClient | None = None) -> str:
-    """Check one site and re-crawl it if needed. Returns the outcome for logging/API.
+    """Check one site and re-crawl it if needed. Returns "unchanged", "changed", "failed" or "missing".
 
-    force: skip the ETag check and re-crawl. manual: triggered by a user, not the scheduler.
+    force: skip the ETag check and always re-crawl.
     """
     settings = settings or get_settings()
-    if site_id in _in_progress:
-        return "busy"
-    _in_progress.add(site_id)
-    owns_client = client is None
-    client = client or make_client(settings)
-    try:
-        return await _process(site_id, force, manual, settings, client)
-    finally:
-        _in_progress.discard(site_id)
-        if owns_client:
-            await client.aclose()
+    if client:
+        return await _process(site_id, force, settings, client)
+    async with make_client(settings) as client:
+        return await _process(site_id, force, settings, client)
 
 
-async def _process(site_id: str, force: bool, manual: bool, settings: Settings, client: httpx.AsyncClient) -> str:
-    # 1. Read what we need, then release the session while doing network work.
+async def _process(site_id: str, force: bool, settings: Settings, client: httpx.AsyncClient) -> str:
+    # 1. Read what we need, then close the session while doing network work.
     with SessionLocal() as session:
         site = session.get(Site, site_id)
         if site is None:
             return "missing"
         url = site.url
-        ttl = settings.monitor_full_crawl_ttl_days
-        ttl_due = ttl > 0 and (site.last_crawled_at is None or utcnow() - site.last_crawled_at >= timedelta(days=ttl))
         targets = _targets(site)
+        ttl = settings.monitor_full_crawl_ttl_days
+        full_crawl_due = ttl > 0 and (site.last_crawled_at is None
+                                      or utcnow() - site.last_crawled_at >= timedelta(days=ttl))
 
-    # 2. Decide whether to crawl.
-    reason = None
+    # 2. Decide whether to re-crawl.
     if force:
-        trigger = "manual"
-    elif ttl_due:
-        trigger = "ttl"
+        reason = "forced"
+    elif full_crawl_due:
+        reason = f"full re-crawl every {ttl:g} days"
     else:
         outcome, reason = await etag_check(targets, settings, client)
-        with SessionLocal() as session:
-            site = session.get(Site, site_id)
-            session.add(CheckRun(site_id=site_id, kind="check", trigger="manual" if manual else "scheduled", result=outcome,
-                                 reason=reason, pages_fetched=len(targets), finished_at=utcnow()))
-            if outcome == "unchanged":
-                _mark_success(site, settings)
-            elif outcome == "failed":
-                _mark_failure(site, reason or "check failed", settings)
-            session.commit()
         if outcome != "changed":
+            with SessionLocal() as session:
+                site = session.get(Site, site_id)
+                if outcome == "unchanged":
+                    _mark_success(site, settings)
+                else:
+                    _mark_failure(site, reason or "check failed", settings)
+                session.commit()
             return outcome
-        trigger = "change_detected"
 
-    # 3. Re-crawl and store.
-    started = utcnow()
+    # 3. Re-crawl and save.
     try:
         result = await crawl(url, settings, client)
         if result.stop_reason == "errors":
             raise CrawlError("too many errors during the crawl")
     except CrawlError as e:
         with SessionLocal() as session:
-            site = session.get(Site, site_id)
-            _mark_failure(site, str(e), settings)
-            session.add(CheckRun(site_id=site_id, kind="crawl", trigger=trigger, result="failed",
-                                 reason=str(e), started_at=started, finished_at=utcnow()))
+            _mark_failure(session.get(Site, site_id), str(e), settings)
             session.commit()
         return "failed"
 
@@ -296,12 +278,8 @@ async def _process(site_id: str, force: bool, manual: bool, settings: Settings, 
         site = session.get(Site, site_id)
         changed, summary = save_crawl(session, site, result, settings)
         _mark_success(site, settings)
-        session.add(CheckRun(site_id=site_id, kind="crawl", trigger=trigger,
-                             result="changed" if changed else "unchanged",
-                             reason=summary or reason, pages_fetched=len(result.pages),
-                             started_at=started, finished_at=utcnow()))
         session.commit()
-    log.info("Re-crawled %s (%s): %s", url, trigger, summary or "no change in llms.txt")
+    log.info("Re-crawled %s (%s): %s", url, reason, summary or "no change in llms.txt")
     return "changed" if changed else "unchanged"
 
 

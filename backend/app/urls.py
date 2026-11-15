@@ -80,13 +80,6 @@ def same_site(url: str, site_host: str) -> bool:
     return bare_host(host) == bare_host(site_host)
 
 
-def with_host(url: str, host: str) -> str:
-    """Rewrite `url` to use `host` (used to fold www/apex variants into one form)."""
-    parts = urlsplit(url)
-    netloc = host if not parts.port else f"{host}:{parts.port}"
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
-
-
 def in_scope(url: str, scope_path: str) -> bool:
     """True if the URL's path is at or under scope_path (e.g. '/docs')."""
     if scope_path in ("", "/"):

@@ -10,8 +10,8 @@ def fake_result() -> CrawlResult:
     return CrawlResult(
         start_url="https://acme.test/", homepage_url="https://acme.test/", scope_path="/",
         site_name="Acme", summary="Acme makes APIs.",
-        pages=[Page(url="https://acme.test/docs/a", title="A", description="Doc A.", section="docs", score=10, depth=1),
-               Page(url="https://acme.test/docs/b", title="B", description="Doc B.", section="docs", score=9, depth=1)],
+        pages=[Page(url="https://acme.test/docs/a", title="A", description="Doc A.", section="docs", score=10),
+               Page(url="https://acme.test/docs/b", title="B", description="Doc B.", section="docs", score=9)],
         sitemaps=[], homepage_etag='"h"', homepage_last_modified=None, failed={},
         stop_reason="queue_empty", duration_seconds=1.0,
     )
@@ -49,10 +49,6 @@ def test_generate_with_monitoring_gives_stable_link(monkeypatch):
         assert txt.status_code == 200 and txt.text == body["llms_txt"]
         assert txt.headers["content-type"].startswith("text/plain")
 
-        site = c.get(f"/api/sites/{body['site_id']}").json()
-        assert site["versions"][0]["change_summary"] == "Initial version (2 pages)"
-        assert site["recent_checks"][0]["trigger"] == "initial"
-
 
 def test_crawl_error_returns_422(monkeypatch):
     with client(monkeypatch, fail=True) as c:
@@ -64,4 +60,3 @@ def test_crawl_error_returns_422(monkeypatch):
 def test_unknown_site_404(monkeypatch):
     with client(monkeypatch) as c:
         assert c.get("/s/nope/llms.txt").status_code == 404
-        assert c.get("/api/sites/nope").status_code == 404

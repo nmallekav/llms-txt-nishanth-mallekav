@@ -114,8 +114,6 @@ No API keys are needed: the app only fetches public pages.
 |---|---|---|
 | POST | `/api/generate` | `{"url": "...", "monitor": false}` → llms.txt, crawl stats, stable link if monitored |
 | GET | `/s/{id}/llms.txt` | Latest llms.txt for a monitored site |
-| GET | `/api/sites/{id}` | Site status, version history, recent checks |
-| POST | `/api/sites/{id}/check` | Run the monitoring check now (`?force=true` re-crawls) |
 | GET | `/docs` | Interactive API docs |
 
 ## Deploy to Railway

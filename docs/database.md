@@ -15,8 +15,6 @@ Only **monitored** sites are stored. A one-off "Generate" without monitoring wri
 erDiagram
     sites ||--o{ site_versions : "has history"
     sites ||--o{ pages : "crawled pages"
-    sites ||--o{ sitemaps : "discovered sitemaps"
-    sites ||--o{ check_runs : "check log"
     sites |o--|| site_versions : "current_version_id"
 
     sites {
@@ -26,6 +24,7 @@ erDiagram
         INTEGER current_version_id FK
         TEXT next_check_at
         TEXT status
+        JSON sitemaps
     }
     site_versions {
         INTEGER id PK
@@ -38,27 +37,17 @@ erDiagram
         INTEGER id PK
         TEXT site_id FK
         TEXT url
-        TEXT fingerprint
-        INTEGER selected
         TEXT etag
-    }
-    sitemaps {
-        INTEGER id PK
-        TEXT site_id FK
-        TEXT url
-        TEXT etag
-    }
-    check_runs {
-        INTEGER id PK
-        TEXT site_id FK
-        TEXT kind
-        TEXT result
     }
 ```
 
 ---
 
 ## Schema (SQLite DDL)
+
+Older databases are upgraded on startup (`_upgrade` in `db.py`): the `sitemaps` column is
+added to `sites`, the old `sitemaps` and `check_runs` tables are dropped, and unused `pages`
+columns (`selected`, `fingerprint`, `http_status`, `last_fetched_at`) are removed.
 
 Timestamps are UTC, stored by SQLAlchemy as ISO-8601 strings. Booleans are `INTEGER` 0/1.
 The models in `backend/app/db.py` create these tables on startup (`init_db`). The `CHECK`
@@ -78,6 +67,7 @@ CREATE TABLE sites (
     homepage_last_modified TEXT,
     scope_path          TEXT NOT NULL DEFAULT '/', -- crawl scope, e.g. /docs
     summary             TEXT,                      -- homepage summary from the last crawl
+    sitemaps            JSON NOT NULL DEFAULT '[]', -- [{url, etag, last_modified}] for the ETag check
     created_at          TEXT NOT NULL,
     last_checked_at     TEXT,                      -- last ETag check (cheap)
     last_crawled_at     TEXT,                      -- last full crawl
@@ -100,7 +90,7 @@ CREATE TABLE site_versions (
 );
 CREATE INDEX idx_versions_site ON site_versions (site_id, created_at DESC);
 
--- Pages from the latest crawl. Selected pages are the ones in the current file.
+-- Pages in the current llms.txt, from the latest crawl.
 CREATE TABLE pages (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     site_id         TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
@@ -111,39 +101,10 @@ CREATE TABLE pages (
     md_url          TEXT,                          -- markdown version, if found
     section         TEXT NOT NULL,                 -- llms.txt H2 section this page belongs to
     score           REAL NOT NULL,                 -- crawler priority score
-    selected        INTEGER NOT NULL DEFAULT 0,    -- 1 if included in the current llms.txt
-    fingerprint     TEXT NOT NULL,                 -- sha256(url + title + description + md_url)
-    etag            TEXT,
-    last_modified   TEXT,
-    http_status     INTEGER,
-    last_fetched_at TEXT NOT NULL,
-    UNIQUE (site_id, url)
-);
-CREATE INDEX idx_pages_selected ON pages (site_id, selected);
-
--- Sitemaps found for a site, so the ETag check can tell if they changed.
-CREATE TABLE sitemaps (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    site_id         TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-    url             TEXT NOT NULL,
     etag            TEXT,
     last_modified   TEXT,
     UNIQUE (site_id, url)
 );
-
--- Log of every ETag check and crawl, for debugging and the site status view.
-CREATE TABLE check_runs (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    site_id         TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-    kind            TEXT NOT NULL CHECK (kind IN ('check', 'crawl')),
-    trigger         TEXT NOT NULL CHECK (trigger IN ('initial', 'scheduled', 'change_detected', 'ttl', 'manual')),
-    result          TEXT NOT NULL CHECK (result IN ('unchanged', 'changed', 'failed')),
-    reason          TEXT,                          -- why a change was detected, or the error
-    pages_fetched   INTEGER NOT NULL DEFAULT 0,
-    started_at      TEXT NOT NULL,
-    finished_at     TEXT
-);
-CREATE INDEX idx_runs_site ON check_runs (site_id, started_at DESC);
 ```
 
 ---
@@ -152,10 +113,10 @@ CREATE INDEX idx_runs_site ON check_runs (site_id, started_at DESC);
 
 | Event | Writes |
 |---|---|
-| User generates with "Monitor" on | Insert `sites`, `site_versions` (v1), `pages`, `sitemaps`, `check_runs` (`crawl`, `initial`) |
-| ETag check, all `304` | Update `sites.last_checked_at`, `next_check_at`; insert `check_runs` (`check`, `unchanged`) |
-| ETag check finds a change | Insert `check_runs` (`check`, `changed`, reason = URL), then run a crawl |
-| Re-crawl, output identical | Replace `pages` / `sitemaps` rows (new ETags); update `last_crawled_at`; no new version |
+| User generates with "Monitor" on | Insert `sites` (with its sitemaps), `site_versions` (v1), `pages` |
+| ETag check, all `304` | Update `sites.last_checked_at`, `next_check_at` |
+| ETag check finds a change | Run a crawl (the reason is logged, not stored) |
+| Re-crawl, output identical | Replace `pages` rows and `sites.sitemaps` (new ETags); update `last_crawled_at`; no new version |
 | Re-crawl, output differs | Same as above, plus insert `site_versions` and point `current_version_id` at it |
 | Check or crawl fails | Increment `fail_count`, set `last_error`; current version untouched |
 | `GET /s/{id}/llms.txt` | Read `site_versions` row at `current_version_id` |

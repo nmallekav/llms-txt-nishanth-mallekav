@@ -60,38 +60,37 @@ def build(site_name: str, summary: str | None, pages: list, homepage_url: str | 
 # ---------- grouping ----------
 
 def _group(entries: list, scope_path: str) -> list[tuple[str, list]]:
-    """Group pages into named sections: Main first, then by best page score."""
+    """Group pages into (section name, pages): Main first, then sections by best page, then Other."""
     groups: dict[str, list] = defaultdict(list)
     for e in entries:
         groups[e.section].append(e)
+    main = groups.pop("", [])  # top-level pages
 
-    # A top-level page like /blog belongs with /blog/* pages, not in Main.
-    for e in list(groups.get("", [])):
+    # A top-level page like /blog belongs with the /blog/* pages, not in Main.
+    for e in list(main):
         segments = path_segments(e.url, scope_path)
-        segment = segments[0].lower() if len(segments) == 1 else ""
-        if segment and segment in groups:
-            groups[""].remove(e)
-            groups[segment].insert(0, e)
+        if len(segments) == 1 and segments[0].lower() in groups:
+            main.remove(e)
+            groups[segments[0].lower()].insert(0, e)
 
-    # One-page sections are collected into a single "Other" section instead of many tiny ones.
-    other = [groups.pop(k)[0] for k in [k for k, v in groups.items() if k and len(v) == 1]]
+    # Sections with a single page go into one "Other" section instead of many tiny ones.
+    other = [items[0] for items in groups.values() if len(items) == 1]
+    groups = {key: items for key, items in groups.items() if len(items) > 1}
 
-    named = []
-    if groups.get(""):
-        named.append((MAIN_SECTION, _sorted(groups.pop(""))))
-    groups.pop("", None)
-    ordered = sorted(groups.items(), key=lambda kv: (-max(e.score for e in kv[1]), kv[0]))
-    used = {MAIN_SECTION, OTHER_SECTION}
-    for key, items in ordered:
+    result = []
+    if main:
+        result.append((MAIN_SECTION, _sorted(main)))
+    used_names = {MAIN_SECTION, OTHER_SECTION}
+    for key, items in sorted(groups.items(), key=lambda kv: (-max(e.score for e in kv[1]), kv[0])):
         name = _section_name(key)
-        while name in used:
+        while name in used_names:
             name += " Pages"
-        used.add(name)
-        # Section overview pages (/blog) first, then the rest by score.
-        named.append((name, sorted(items, key=lambda e: (len(path_segments(e.url, scope_path)), -e.score, e.url))))
+        used_names.add(name)
+        # The section's overview page (/blog) first, then the rest by score.
+        result.append((name, sorted(items, key=lambda e: (len(path_segments(e.url, scope_path)), -e.score, e.url))))
     if other:
-        named.append((OTHER_SECTION, _sorted(other)))
-    return named
+        result.append((OTHER_SECTION, _sorted(other)))
+    return result
 
 
 def _section_name(key: str) -> str:
@@ -136,16 +135,16 @@ def _drop_boilerplate(pages: list) -> list:
 
 
 def _dedupe(pages: list, max_chars: int) -> list:
-    by_url: dict[str, object] = {}
-    for p in sorted(pages, key=lambda p: (-p.score, p.url)):
-        by_url.setdefault(p.url, p)
+    """Drop repeated URLs and pages with the same title and description, keeping the best-scored one."""
+    seen_urls: set[str] = set()
     seen_text: set[tuple[str, str]] = set()
     result = []
-    for p in by_url.values():
-        key = (p.title.lower(), (_note(p, max_chars) or "").lower())
-        if key in seen_text:
+    for p in _sorted(pages):
+        text = (p.title.lower(), (_note(p, max_chars) or "").lower())
+        if p.url in seen_urls or text in seen_text:
             continue
-        seen_text.add(key)
+        seen_urls.add(p.url)
+        seen_text.add(text)
         result.append(p)
     return result
 

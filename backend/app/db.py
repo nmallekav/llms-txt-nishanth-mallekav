@@ -4,7 +4,7 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import JSON, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, create_engine, event
+from sqlalchemy import JSON, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -36,6 +36,8 @@ class Site(Base):
     homepage_last_modified: Mapped[str | None] = mapped_column(String)
     scope_path: Mapped[str] = mapped_column(String, default="/")
     summary: Mapped[str | None] = mapped_column(Text)
+    # Sitemaps found in the last crawl: [{"url", "etag", "last_modified"}], re-checked by the monitor.
+    sitemaps: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_checked_at: Mapped[datetime | None]
     last_crawled_at: Mapped[datetime | None]
@@ -46,7 +48,6 @@ class Site(Base):
 
     current_version: Mapped["SiteVersion | None"] = relationship(foreign_keys=[current_version_id], post_update=True)
     pages: Mapped[list["PageRow"]] = relationship(back_populates="site", cascade="all, delete-orphan")
-    sitemaps: Mapped[list["SitemapRow"]] = relationship(back_populates="site", cascade="all, delete-orphan")
 
     __table_args__ = (Index("idx_sites_next_check", "status", "next_check_at"),)
 
@@ -74,52 +75,15 @@ class PageRow(Base):
     title: Mapped[str] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
     alt_descriptions: Mapped[list] = mapped_column(JSON, default=list)
-    md_url: Mapped[str | None] = mapped_column(String)
+    md_url: Mapped[str | None] = mapped_column(String)  # markdown version of the page, if found
     section: Mapped[str] = mapped_column(String)
     score: Mapped[float] = mapped_column(Float)
-    selected: Mapped[bool] = mapped_column(default=True)
-    fingerprint: Mapped[str] = mapped_column(String)
     etag: Mapped[str | None] = mapped_column(String)
     last_modified: Mapped[str | None] = mapped_column(String)
-    http_status: Mapped[int | None] = mapped_column(Integer)
-    last_fetched_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     site: Mapped[Site] = relationship(back_populates="pages")
 
-    __table_args__ = (
-        UniqueConstraint("site_id", "url"),
-        Index("idx_pages_selected", "site_id", "selected"),
-    )
-
-
-class SitemapRow(Base):
-    __tablename__ = "sitemaps"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    site_id: Mapped[str] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"))
-    url: Mapped[str] = mapped_column(String)
-    etag: Mapped[str | None] = mapped_column(String)
-    last_modified: Mapped[str | None] = mapped_column(String)
-
-    site: Mapped[Site] = relationship(back_populates="sitemaps")
-
     __table_args__ = (UniqueConstraint("site_id", "url"),)
-
-
-class CheckRun(Base):
-    __tablename__ = "check_runs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    site_id: Mapped[str] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"))
-    kind: Mapped[str] = mapped_column(String)  # check | crawl
-    trigger: Mapped[str] = mapped_column(String)  # initial | scheduled | change_detected | ttl | manual
-    result: Mapped[str] = mapped_column(String)  # unchanged | changed | failed
-    reason: Mapped[str | None] = mapped_column(Text)
-    pages_fetched: Mapped[int] = mapped_column(Integer, default=0)
-    started_at: Mapped[datetime] = mapped_column(default=utcnow)
-    finished_at: Mapped[datetime | None]
-
-    __table_args__ = (Index("idx_runs_site", "site_id", "started_at"),)
 
 
 def make_engine(url: str):
@@ -144,10 +108,32 @@ _engine = None
 SessionLocal = sessionmaker(expire_on_commit=False)
 
 
+_REMOVED_PAGE_COLUMNS = ("selected", "fingerprint", "http_status", "last_fetched_at")
+
+
+def _upgrade(engine) -> None:
+    """Bring a database created by an older schema up to date."""
+    insp = inspect(engine)
+    site_columns = {c["name"] for c in insp.get_columns("sites")}
+    page_columns = {c["name"] for c in insp.get_columns("pages")}
+    with engine.begin() as conn:
+        if "sitemaps" not in site_columns:
+            conn.execute(text("ALTER TABLE sites ADD COLUMN sitemaps JSON NOT NULL DEFAULT '[]'"))
+        conn.execute(text("DROP TABLE IF EXISTS sitemaps"))
+        conn.execute(text("DROP TABLE IF EXISTS check_runs"))
+        conn.execute(text("DROP INDEX IF EXISTS idx_pages_selected"))
+        for column in _REMOVED_PAGE_COLUMNS:
+            if column in page_columns:
+                conn.execute(text(f"ALTER TABLE pages DROP COLUMN {column}"))
+        if "md_url" not in page_columns:
+            conn.execute(text("ALTER TABLE pages ADD COLUMN md_url VARCHAR"))
+
+
 def init_db(url: str | None = None):
     """Create the engine and tables. Called once at startup (and by tests with sqlite://)."""
     global _engine
     _engine = make_engine(url or get_settings().database_url)
     Base.metadata.create_all(_engine)
+    _upgrade(_engine)
     SessionLocal.configure(bind=_engine)
     return _engine

@@ -2,20 +2,18 @@
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 
 from .config import get_settings
 from .crawler import CrawlError
-from .db import CheckRun, SessionLocal, Site, SiteVersion, init_db
+from .db import SessionLocal, Site, init_db
 from .generate import generate
-from .monitor import process_site, start_scheduler, store_site
+from .monitor import start_scheduler, store_site
 
 log = logging.getLogger(__name__)
 
@@ -59,36 +57,6 @@ class GenerateResponse(BaseModel):
     stable_url: str | None = None
 
 
-class VersionOut(BaseModel):
-    id: int
-    created_at: datetime
-    page_count: int
-    change_summary: str | None
-
-
-class CheckOut(BaseModel):
-    kind: str
-    trigger: str
-    result: str
-    reason: str | None
-    started_at: datetime
-
-
-class SiteOut(BaseModel):
-    id: str
-    url: str
-    name: str | None
-    status: str
-    stable_url: str
-    last_checked_at: datetime | None
-    last_crawled_at: datetime | None
-    last_changed_at: datetime | None
-    next_check_at: datetime
-    last_error: str | None
-    versions: list[VersionOut]
-    recent_checks: list[CheckOut]
-
-
 def stable_url(request: Request, site_id: str) -> str:
     base = get_settings().public_base_url.rstrip("/") or str(request.base_url).rstrip("/")
     return f"{base}/s/{site_id}/llms.txt"
@@ -126,40 +94,6 @@ async def generate_llms_txt(body: GenerateRequest, request: Request):
         site_id=site_id,
         stable_url=stable_url(request, site_id) if site_id else None,
     )
-
-
-@app.get("/api/sites/{site_id}", response_model=SiteOut)
-def get_site(site_id: str, request: Request):
-    with SessionLocal() as session:
-        site = session.get(Site, site_id)
-        if site is None:
-            raise HTTPException(status_code=404, detail="Site not found")
-        versions = session.scalars(
-            select(SiteVersion).where(SiteVersion.site_id == site_id).order_by(SiteVersion.id.desc()).limit(20)
-        ).all()
-        checks = session.scalars(
-            select(CheckRun).where(CheckRun.site_id == site_id).order_by(CheckRun.id.desc()).limit(20)
-        ).all()
-        return SiteOut(
-            id=site.id, url=site.url, name=site.name, status=site.status,
-            stable_url=stable_url(request, site.id),
-            last_checked_at=site.last_checked_at, last_crawled_at=site.last_crawled_at,
-            last_changed_at=site.last_changed_at, next_check_at=site.next_check_at,
-            last_error=site.last_error,
-            versions=[VersionOut(id=v.id, created_at=v.created_at, page_count=v.page_count,
-                                 change_summary=v.change_summary) for v in versions],
-            recent_checks=[CheckOut(kind=c.kind, trigger=c.trigger, result=c.result, reason=c.reason,
-                                    started_at=c.started_at) for c in checks],
-        )
-
-
-@app.post("/api/sites/{site_id}/check")
-async def check_site(site_id: str, force: bool = False):
-    """Run the monitoring check now (force=true skips the ETag check and re-crawls)."""
-    outcome = await process_site(site_id, force=force, manual=True)
-    if outcome == "missing":
-        raise HTTPException(status_code=404, detail="Site not found")
-    return {"outcome": outcome}
 
 
 @app.get("/s/{site_id}/llms.txt", response_class=PlainTextResponse)

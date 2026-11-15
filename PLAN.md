@@ -46,8 +46,8 @@ flowchart LR
 4. **Monitor:** every day (configurable), each stored site gets an ETag check on its
    homepage, sitemaps and listed pages. If any ETag changed, the site is re-crawled
    automatically and the new llms.txt is stored if it differs. → [docs/monitoring.md](docs/monitoring.md)
-5. **Store:** everything lives in one SQLite file: sites, version history, pages,
-   sitemaps and a check log. → [docs/database.md](docs/database.md)
+5. **Store:** everything lives in one SQLite file: sites, version history and
+   pages. → [docs/database.md](docs/database.md)
 
 API, components and repo layout: [docs/architecture.md](docs/architecture.md)
 

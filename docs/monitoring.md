@@ -75,7 +75,7 @@ Then read the response:
 
 The check **stops at the first changed URL** and starts the re-crawl, so an unchanged
 site costs one request per URL, almost all of them bodiless `304`s. The URL that
-triggered it is stored in `check_runs.reason`, e.g. `etag changed: /pricing`.
+triggered it is written to the log, e.g. `etag changed: /pricing`.
 
 ### Is the ETag reliable?
 
@@ -123,8 +123,8 @@ Worst-case staleness is therefore one check interval for most changes, and
 
 ### Change summary
 
-Each page has `fingerprint = sha256(url + title + description + md_url)` after text
-cleaning. When a new version is saved, old and new fingerprints produce a short summary,
+Each page's `fingerprint = sha256(url + title + description + md_url)` is computed from the stored
+row (not saved). When a new version is saved, old and new fingerprints produce a short summary,
 e.g. `+3 pages, −1 page, 2 descriptions changed`, stored in `site_versions.change_summary`.
 
 ## Avoiding false alarms
@@ -138,12 +138,6 @@ e.g. `+3 pages, −1 page, 2 descriptions changed`, stored in `site_versions.cha
   `404` / `410`, or when the crawler no longer selects it.
 - **Known limitation:** descriptions with live values ("Join 10,234 developers") change
   the real output, so they create a new version each time they change.
-
-## Running a check by hand
-
-`POST /api/sites/{id}/check` runs the same flow immediately (logged with trigger `manual`).
-`POST /api/sites/{id}/check?force=true` skips the ETag check and re-crawls. Useful for demos
-and debugging, since the scheduler otherwise waits for the interval.
 
 ## Failures
 

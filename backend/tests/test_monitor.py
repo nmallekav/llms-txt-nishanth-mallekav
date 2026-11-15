@@ -1,10 +1,9 @@
 import asyncio
 
 import pytest
-from sqlalchemy import select
 
 from app.crawler import crawl
-from app.db import CheckRun, SessionLocal, Site, init_db
+from app.db import SessionLocal, Site, init_db
 from app.monitor import change_summary, process_site, store_site
 from tests.conftest import FakeSite, html
 
@@ -41,9 +40,9 @@ def check(site_id, fake, settings, force=False):
     return asyncio.run(go())
 
 
-def latest_runs(site_id):
+def get_site(site_id) -> Site:
     with SessionLocal() as session:
-        return session.scalars(select(CheckRun).where(CheckRun.site_id == site_id).order_by(CheckRun.id)).all()
+        return session.get(Site, site_id)
 
 
 def test_store_site_creates_first_version(settings):
@@ -62,7 +61,6 @@ def test_unchanged_etags_skip_crawl(settings):
 
     assert check(site_id, fake, settings) == "unchanged"
     assert all(r.headers.get("if-none-match") for r in fake.requests)  # only conditional GETs
-    assert latest_runs(site_id)[-1].kind == "check"
 
 
 def test_changed_etag_triggers_recrawl_and_new_version(settings):
@@ -72,11 +70,10 @@ def test_changed_etag_triggers_recrawl_and_new_version(settings):
     fake.headers["/pricing"] = {"etag": '"p2"'}
 
     assert check(site_id, fake, settings) == "changed"
-    runs = latest_runs(site_id)
-    assert (runs[-2].kind, runs[-2].result, runs[-2].reason) == ("check", "changed", "etag changed: /pricing")
-    assert (runs[-1].kind, runs[-1].trigger, runs[-1].reason) == ("crawl", "change_detected", "1 page updated")
     with SessionLocal() as session:
-        assert "New plans for everyone." in session.get(Site, site_id).current_version.llms_txt
+        version = session.get(Site, site_id).current_version
+        assert version.change_summary == "1 page updated"
+        assert "New plans for everyone." in version.llms_txt
 
 
 def test_changed_etag_with_same_output_keeps_version(settings):
@@ -111,8 +108,9 @@ def test_missing_validators_count_as_changed(settings):
     fake = make_site()
     fake.headers = {}
     site_id = start_monitoring(fake, settings)
+    crawled_at = get_site(site_id).last_crawled_at
     check(site_id, fake, settings)
-    assert latest_runs(site_id)[-2].reason.startswith("no ETag or Last-Modified")
+    assert get_site(site_id).last_crawled_at > crawled_at  # re-crawled
 
 
 def test_failed_check_is_not_a_change(settings):
@@ -122,7 +120,21 @@ def test_failed_check_is_not_a_change(settings):
     fake.headers["/docs"] = {}
 
     assert check(site_id, fake, settings) == "failed"
-    assert latest_runs(site_id)[-1].reason == "HTTP 503: /docs"
+    assert get_site(site_id).last_error == "HTTP 503: /docs"
+
+
+def test_sitemaps_are_stored_and_checked(settings):
+    fake = make_site()
+    fake.routes["/sitemap.xml"] = (200, "application/xml",
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://acme.test/docs</loc></url></urlset>')
+    fake.headers["/sitemap.xml"] = {"etag": '"s1"'}
+    site_id = start_monitoring(fake, settings)
+    assert get_site(site_id).sitemaps == [{"url": "https://acme.test/sitemap.xml", "etag": '"s1"', "last_modified": None}]
+
+    fake.headers["/sitemap.xml"] = {"etag": '"s2"'}
+    fake.requests.clear()
+    check(site_id, fake, settings)
+    assert any(not r.headers.get("if-none-match") for r in fake.requests)  # sitemap change triggered a crawl
 
 
 def test_failed_crawl_keeps_version_and_schedules_retry(settings):
@@ -145,8 +157,10 @@ def test_ttl_forces_full_crawl(settings):
         site = session.get(Site, site_id)
         site.last_crawled_at = site.last_crawled_at.replace(year=2000)
         session.commit()
+    fake.requests.clear()
     check(site_id, fake, settings)
-    assert latest_runs(site_id)[-1].trigger == "ttl"
+    assert get_site(site_id).last_crawled_at.year != 2000
+    assert not any(r.headers.get("if-none-match") for r in fake.requests)  # crawled without an ETag check
 
 
 def test_change_summary():

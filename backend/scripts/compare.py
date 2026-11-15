@@ -17,7 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import llmstxt, urls  # noqa: E402
 from app.config import get_settings  # noqa: E402
-from app.crawler import CrawlError, make_client  # noqa: E402
+from app.crawler import CrawlError  # noqa: E402
+from app.fetcher import make_client  # noqa: E402
 from app.generate import generate  # noqa: E402
 
 LINK_RE = re.compile(r"^- \[(?:[^\]\\]|\\.)+\]\(([^)\s]+)\)", re.M)
@@ -25,8 +26,8 @@ LINK_RE = re.compile(r"^- \[(?:[^\]\\]|\\.)+\]\(([^)\s]+)\)", re.M)
 
 def parse(text: str) -> tuple[str, list[str], set[str]]:
     text = text.lstrip("\ufeff")
-    h1 = next((l[2:].strip() for l in text.splitlines() if l.startswith("# ")), "?")
-    sections = [l[3:].strip() for l in text.splitlines() if l.startswith("## ")]
+    h1 = next((line[2:].strip() for line in text.splitlines() if line.startswith("# ")), "?")
+    sections = [line[3:].strip() for line in text.splitlines() if line.startswith("## ")]
     main_part = re.split(r"^## Optional\s*$", text, flags=re.M)[0]
     links = {_key(u) for u in LINK_RE.findall(main_part)}
     return h1, sections, links

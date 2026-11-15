@@ -29,7 +29,11 @@ sequenceDiagram
 | Module | Responsibility | Details |
 |---|---|---|
 | `urls.py` | URL normalization, scope and skip rules (pure functions) | [crawler.md](crawler.md#3-url-normalization) |
-| `crawler.py` | Discover and fetch pages, priority queue | [crawler.md](crawler.md) |
+| `crawler.py` | The crawl itself: robots.txt, homepage, priority queue, crawl loop | [crawler.md](crawler.md) |
+| `scoring.py` | How the crawler ranks URLs (which to fetch next) | [crawler.md](crawler.md) |
+| `fetcher.py` | One HTTP GET with a size cap and error codes instead of exceptions | [crawler.md](crawler.md) |
+| `sitemaps.py` | Parse sitemap.xml and sitemap index files (pure functions) | [crawler.md](crawler.md) |
+| `markdown.py` | Find `.md` versions of pages | [llms-txt-format.md](llms-txt-format.md) |
 | `extract.py` | Pull title, description, canonical, markdown alternate from HTML | [llms-txt-format.md](llms-txt-format.md#where-each-value-comes-from) |
 | `llmstxt.py` | Build + validate the llms.txt file | [llms-txt-format.md](llms-txt-format.md) |
 | `generate.py` | Glue: crawl, then build + validate | below |
@@ -44,8 +48,6 @@ sequenceDiagram
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/generate` | Crawl + generate; optionally start monitoring |
-| GET | `/api/sites/{id}` | Monitored site info, version history, recent checks |
-| POST | `/api/sites/{id}/check` | Run the monitoring check now (`?force=true` re-crawls) |
 | GET | `/api/health` | Health check |
 | GET | `/docs` | FastAPI's interactive API docs |
 | GET | `/s/{id}/llms.txt` | Latest llms.txt for a monitored site (stable link) |
@@ -76,6 +78,10 @@ llms-txt-nishanth-mallekav/
 │   │   ├── config.py
 │   │   ├── urls.py
 │   │   ├── crawler.py
+│   │   ├── scoring.py
+│   │   ├── fetcher.py
+│   │   ├── sitemaps.py
+│   │   ├── markdown.py
 │   │   ├── extract.py
 │   │   ├── llmstxt.py
 │   │   ├── generate.py

@@ -2,7 +2,9 @@ import asyncio
 
 import pytest
 
-from app.crawler import CrawlError, crawl, markdown_candidates, parse_sitemap
+from app.crawler import CrawlError, crawl
+from app.markdown import markdown_candidates
+from app.sitemaps import parse_sitemap
 from tests.conftest import FakeSite, html
 
 HOME = html(
