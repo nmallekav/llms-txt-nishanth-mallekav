@@ -51,6 +51,8 @@ flowchart LR
 
 API, components and repo layout: [docs/architecture.md](docs/architecture.md)
 
+Classes, how they interact, and pseudocode for every file: [docs/code-walkthrough.md](docs/code-walkthrough.md)
+
 ## Testing while building
 
 Compare our output for **4–5 sample sites** against the llms.txt files they publish,
