@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     cache_max_age_hours: float = 24
 
     # --- Monitoring (see docs/monitoring.md) ---
-    monitor_enabled: bool = True
+    monitor_enabled: bool = False  # off for now; set MONITOR_ENABLED=true to start the scheduler
     monitor_check_interval_hours: float = 24
     monitor_full_crawl_ttl_days: float = 7  # 0 disables the forced full crawl
     monitor_tick_minutes: float = 15
