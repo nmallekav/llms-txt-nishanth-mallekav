@@ -133,6 +133,14 @@ No API keys are needed: the app only fetches public pages.
 
 Railway sets `PORT`; the container listens on it.
 
+The live deployment uses:
+
+```
+PUBLIC_BASE_URL=https://web-production-905dcb88.up.railway.app
+```
+
+so stable links look like `https://web-production-905dcb88.up.railway.app/s/{site_id}/llms.txt`.
+
 ## Project layout
 
 ```
