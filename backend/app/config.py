@@ -33,8 +33,11 @@ class Settings(BaseSettings):
     crawl_request_timeout_seconds: float = 10
     crawl_concurrency: int = 5
     crawl_max_redirects: int = 5
+    # Largest response we download from one URL (pages, robots.txt, sitemaps). Bigger ones are skipped.
+    # Gzipped sitemaps may unpack to 5x this. Protects memory and the crawl's time budget.
     crawl_max_body_bytes: int = 2_000_000
     crawl_max_consecutive_errors: int = 5
+    # How many sitemap files we fetch per crawl, including child sitemaps from a sitemap index.
     crawl_max_sitemaps: int = 5
     crawl_max_sitemap_urls: int = 5000
     crawl_section_ceiling: int = 15
