@@ -18,8 +18,8 @@ COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/app backend/app
 COPY --from=frontend /frontend/dist frontend/dist
+# /data holds the SQLite file. Mount a volume there (docker-compose does; on Railway add one).
 RUN mkdir -p /data
-VOLUME ["/data"]
 EXPOSE 8000
 # One worker on purpose: SQLite has one writer, and the scheduler runs in-process.
 CMD ["sh", "-c", "uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port ${PORT} --workers 1"]
