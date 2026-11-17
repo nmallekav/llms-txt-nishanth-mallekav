@@ -4,7 +4,7 @@ Enter a website URL and get an [`llms.txt`](https://llmstxt.org) file for it. Tu
 monitoring and the app re-checks the site every day, regenerating the file when the
 site changes and serving the latest version at a stable link.
 
-**Live app:** _add the Railway URL here after deploying_
+**Live app:** https://web-production-905dcb88.up.railway.app
 
 <!-- Screenshots: add docs/screenshots/*.png here -->
 
