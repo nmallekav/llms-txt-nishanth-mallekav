@@ -10,7 +10,7 @@ Every few minutes the scheduler picks the sites that are due (about once a day e
 import asyncio
 import hashlib
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
@@ -19,11 +19,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import quality
 from .config import Settings, get_settings
 from .crawler import CrawlError, CrawlResult, Page, crawl
 from .fetcher import make_client
 from .db import PageRow, SessionLocal, Site, SiteVersion, utcnow
 from .generate import render
+from .llmstxt import validate
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +90,10 @@ def save_crawl(session: Session, site: Site, result: CrawlResult, settings: Sett
     site.scope_path = result.scope_path
     site.last_crawled_at = now
     site.sitemaps = [{"url": s.url, "etag": s.etag, "last_modified": s.last_modified} for s in result.sitemaps]
+    site.crawl_stats = {"pages": len(result.pages), "sitemaps": len(result.sitemaps),
+                        "duration_seconds": result.duration_seconds, "stop_reason": result.stop_reason,
+                        "partial": result.partial}
+    site.quality = asdict(quality.assess(result, text, validate(text)))
 
     # Replace pages (delete first so the (site_id, url) unique constraint holds).
     for row in list(site.pages):
@@ -130,6 +136,21 @@ def store_site(session: Session, result: CrawlResult, settings: Settings | None 
     save_crawl(session, site, result, settings)
     _mark_success(site, settings)
     session.commit()
+    return site
+
+
+def cached_site(session: Session, url: str, settings: Settings | None = None) -> Site | None:
+    """A stored site whose llms.txt was confirmed current within cache_max_age_hours, or None."""
+    settings = settings or get_settings()
+    if settings.cache_max_age_hours <= 0:
+        return None
+    site = session.scalar(select(Site).where(Site.url == url))
+    if site is None or site.current_version is None or site.last_checked_at is None:
+        return None
+    if site.crawl_stats is None or site.quality is None:
+        return None  # stored before these were saved; a fresh crawl fills them in
+    if utcnow() - site.last_checked_at > timedelta(hours=settings.cache_max_age_hours):
+        return None
     return site
 
 

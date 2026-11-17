@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from . import llmstxt
+from . import llmstxt, quality
 from .config import Settings, get_settings
 from .crawler import CrawlResult, Page, crawl
 
@@ -12,6 +12,7 @@ class Generated:
     llms_txt: str
     crawl: CrawlResult
     problems: list[str]  # spec violations found by the validator (should be empty)
+    quality: quality.QualityReport
 
 
 def render(result: CrawlResult, pages: list[Page] | None = None, settings: Settings | None = None) -> str:
@@ -30,4 +31,6 @@ async def generate(url: str, settings: Settings | None = None) -> Generated:
     settings = settings or get_settings()
     result = await crawl(url, settings)
     text = render(result, settings=settings)
-    return Generated(llms_txt=text, crawl=result, problems=llmstxt.validate(text))
+    problems = llmstxt.validate(text)
+    return Generated(llms_txt=text, crawl=result, problems=problems,
+                     quality=quality.assess(result, text, problems))

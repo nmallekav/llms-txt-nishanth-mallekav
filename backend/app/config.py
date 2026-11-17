@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     # --- Output ---
     description_max_chars: int = 200
 
+    # --- Cache ---
+    # A stored site checked within this many hours is returned instantly instead of re-crawled.
+    # 0 disables the cache. Users can always force a fresh crawl with "Regenerate now".
+    cache_max_age_hours: float = 24
+
     # --- Monitoring (see docs/monitoring.md) ---
     monitor_enabled: bool = True
     monitor_check_interval_hours: float = 24

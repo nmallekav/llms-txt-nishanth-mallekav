@@ -157,14 +157,15 @@ def ensure_scheme(url: str) -> str:
     return url
 
 
-def is_public_host(host: str) -> bool:
-    """False if the host resolves to a private, loopback, link-local or reserved address."""
+def resolve_host(host: str) -> list[str]:
+    """The IP addresses a host name resolves to, or [] if the domain doesn't exist."""
     try:
-        infos = socket.getaddrinfo(host, None)
+        return [info[4][0] for info in socket.getaddrinfo(host, None)]
     except socket.gaierror:
-        return False
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            return False
-    return True
+        return []
+
+
+def is_public_ip(address: str) -> bool:
+    """False for private, loopback, link-local, reserved and multicast addresses."""
+    ip = ipaddress.ip_address(address)
+    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast)

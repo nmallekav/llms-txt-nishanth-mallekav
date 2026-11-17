@@ -73,3 +73,58 @@ Run on 2026-11-14 with default settings (50-page budget).
 - Fixes made because of this testing: `og:site_name` taglines are stripped ("APIstax - Secure
   and reliable APIs" → "APIstax"), plural acronyms are cased correctly ("APIs"), and
   site-wide boilerplate descriptions are replaced with page-specific text.
+
+---
+
+## Random sample of 20 sites (2026-11-17)
+
+20 sites picked at random (fixed seed) from the 1,695 on llmstxt.site, after removing
+adult and gambling sites. Each was run through the full generator with default settings.
+
+| Result | Count |
+|---|---|
+| Generated a file | **18 of 20** |
+| Passed the spec validator | 18 of 18 |
+| Average quality score | 92 / 100 |
+| Average crawl time | 15 s |
+
+The 2 failures were correct: `handbook.exemplar.dev` returns `404` for its homepage, and
+`fitravel.app` no longer exists (the domain doesn't resolve).
+
+| Site | Pages | Sections | Time | Quality |
+|---|---|---|---|---|
+| formwerk.dev | 23 | 4 | 7 s | 95 |
+| nisiri.ro | 15 | 1 | 17 s | 100 |
+| www.aipredictstock.com | 50 | 5 | 23 s | 92 |
+| www.ehg.health | 50 | 8 | 24 s | 95 |
+| slumpgenerator.com | 17 | 3 | 2 s | 89 |
+| reflag.com | 50 | 4 | 8 s | 94 |
+| itemit.com | 50 | 6 | 7 s | 95 |
+| edunexttechnologies.com | 15 | 1 | 6 s | 83 |
+| eastbrookhomes.com | 50 | 8 | 33 s | 95 |
+| astroline.today/en | 50 | 7 | 14 s | 94 |
+| reference.wordize.com | 17 | 1 | 7 s | 95 |
+| smartcar.com | 50 | 7 | 15 s | 100 |
+| nokovandson.com | 50 | 4 | 35 s | 83 |
+| www.jeekrapid.com | 48 | 5 | 23 s | 95 |
+| www.eurolots.com | 16 | 2 | 11 s | 85 |
+| blog.calendarscripts.info | 15 | 1 | 19 s | 93 |
+| readwise.io | 40 | 5 | 10 s | 86 |
+| withpoli.com | 2 | 1 | 1 s | 95 |
+
+### Fixes made because of this run
+
+- **`403` pages no longer stop the crawl.** readwise.io returns `403` for login-only pages
+  (`/books/product/...`); five in a row stopped the crawl at 13 pages. Now only timeouts,
+  network errors, `5xx` and `429` count toward the early stop. readwise.io now gets 40 pages.
+- **Clearer error for domains that don't exist:** "Couldn't find fitravel.app. Check the
+  address and try again." instead of "doesn't resolve to a public address".
+- **Large menus aren't penalized in the quality score.** reference.wordize.com's "menu" has
+  793 links (a full API index), which made "Key pages" read 16 of 793. Menus over 30 links
+  are now reported without a penalty.
+
+### Remaining limitation seen
+
+- **withpoli.com** is a JavaScript-rendered app (Next.js) with almost no links in its
+  HTML, so the file has a single link. This is the case the "Render JavaScript websites"
+  improvement in [code-walkthrough.md](code-walkthrough.md#6-improvements) would fix.

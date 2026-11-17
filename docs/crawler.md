@@ -23,9 +23,7 @@ flowchart TD
     D --> E{Stop condition hit?}
     E -->|yes| Z[Return extracted pages]
     E -->|no| F[Pop highest-scoring URL]
-    F --> G{Score still current?}
-    G -->|no, dropped below next item| H[Re-push with new score] --> E
-    G -->|yes| I[Fetch page]
+    F --> I[Fetch page]
     I --> J{HTML, allowed,<br/>not noindex?}
     J -->|no| E
     J -->|yes| K[Extract title, description,<br/>markdown alternate]
@@ -96,8 +94,8 @@ Checked after fetching:
 
 - Python `heapq` (a min-heap) storing `(-score, counter, url)`. Negating the score
   pops the highest first; `counter` breaks ties in discovery order.
-- A `seen` dict tracks every queued URL and its signals, so a URL found again is
-  **boosted**, not queued twice.
+- A `candidates` dict tracks every queued URL and its signals. A URL found again gets
+  its signals updated and is pushed with its higher score; it's still only fetched once.
 
 ### Score formula (higher = more important)
 
@@ -110,27 +108,26 @@ Checked after fetching:
 | Each additional page linking to it | +3 |
 | High-value path keyword (`docs`, `guide`, `api`, `getting-started`, `quickstart`, `reference`, `about`, `pricing`, `product`, `features`, `faq`) | +20 |
 | Each path segment deep (`/a/b/c` = 3) | −8 |
-| Each page already taken from the same section | −5 |
+| Each page already taken from the same section (counted when the URL is queued) | −5 |
 
 A **section** is the first path segment under the scope (`/docs/...` → `docs`); top-level
 pages (`/about`) have no section and go to **Main**; date-based paths (`/2024/05/post`)
 form one `posts` section.
 
-### Lazy re-scoring
+### Scored once, when queued
 
-Two signals change after a URL is queued: the section penalty (grows as we take
-pages from a section) and the inbound-link bonus (grows as more pages link to it).
-Updating entries inside a heap is awkward, so we re-score on pop:
+A URL is scored when it's added to the queue, and keeps that score until it's fetched.
+If another page links to it later, it's pushed again with its new, higher score; the
+older entry is skipped when it comes out because the URL is already visited.
 
-1. Pop the top URL and recompute its score.
-2. If the new score is lower than the next item in the heap, push it back and pop again.
-3. Otherwise, fetch it.
+The section penalty uses the number of pages taken from that section **at the time the
+URL is queued**. Scores already in the queue aren't updated as a section fills up. That
+keeps the queue simple; the section ceiling below stops any one section from dominating.
 
 ### Section ceiling
 
-The −5 penalty spreads pages across sections naturally. As a safety net, a hard
-ceiling of **15 pages per section** stops one huge section (e.g. `/blog`) from
-taking the whole budget.
+A hard ceiling of **15 pages per section** stops one huge section (e.g. `/blog`) from
+taking the whole budget. Once a section has 15 pages, its remaining URLs are skipped.
 
 ### Known trade-off
 
@@ -154,7 +151,9 @@ The crawl ends at the **first** of these:
 Early exits:
 
 - Homepage fails to load → return a clear error (no partial result).
-- 5 consecutive errors or `429 Too Many Requests` → stop, return partial results.
+- 5 consecutive timeouts, network errors, `5xx` or `429 Too Many Requests` → stop, return partial results.
+  A `403` on individual pages (usually login-only pages) doesn't count: a site that blocks us
+  entirely already fails at the homepage.
 
 ## 7. Request limits and politeness
 

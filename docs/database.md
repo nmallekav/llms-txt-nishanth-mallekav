@@ -68,6 +68,8 @@ CREATE TABLE sites (
     scope_path          TEXT NOT NULL DEFAULT '/', -- crawl scope, e.g. /docs
     summary             TEXT,                      -- homepage summary from the last crawl
     sitemaps            JSON NOT NULL DEFAULT '[]', -- [{url, etag, last_modified}] for the ETag check
+    crawl_stats         JSON,                      -- pages, sitemaps, duration, stop reason (for cached responses)
+    quality             JSON,                      -- quality report from the last crawl (for cached responses)
     created_at          TEXT NOT NULL,
     last_checked_at     TEXT,                      -- last ETag check (cheap)
     last_crawled_at     TEXT,                      -- last full crawl

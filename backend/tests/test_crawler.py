@@ -65,6 +65,8 @@ def test_crawl_finds_pages_and_respects_rules(settings):
     assert "/login" not in requested and "/files/report.pdf" not in requested
     assert result.stop_reason == "queue_empty"
     assert [s.url for s in result.sitemaps] == ["https://acme.test/sitemap.xml"]
+    assert sorted(result.nav_urls) == ["https://acme.test/docs", "https://acme.test/pricing"]  # /login skipped
+    assert result.sitemap_url_count == 1  # /secret/page is blocked by robots.txt
 
 
 def test_titles_have_site_name_stripped(settings):
@@ -101,6 +103,21 @@ def test_robots_disallowing_start_raises(settings):
     fake = FakeSite({"/robots.txt": (200, "text/plain", "User-agent: *\nDisallow: /\n"), "/": HOME})
     with pytest.raises(CrawlError, match="robots.txt"):
         run(fake, settings)
+
+
+def test_unknown_domain_has_a_clear_error(settings):
+    with pytest.raises(CrawlError, match="Couldn't find"):
+        run(site(), settings.model_copy(update={"crawl_allow_private_hosts": False}), url="https://no-such-host.invalid/")
+
+
+def test_403_pages_do_not_stop_the_crawl(settings):
+    fake = site()
+    for i in range(8):
+        fake.routes[f"/members/{i}"] = (403, "text/html", "login required")
+    fake.routes["/"] = HOME.replace("</main>", "".join(f'<a href="/members/{i}">m</a>' for i in range(8)) + "</main>")
+    result = run(fake, settings)
+    assert result.stop_reason == "queue_empty"
+    assert "https://acme.test/pricing" in {p.url for p in result.pages}
 
 
 def test_private_hosts_blocked_by_default(settings):

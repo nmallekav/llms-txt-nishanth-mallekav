@@ -72,6 +72,8 @@ class CrawlResult:
     failed: dict[str, str]  # url -> "transient", "gone" or another reason
     stop_reason: str  # "max_pages", "queue_empty", "time" or "errors"
     duration_seconds: float
+    nav_urls: list[str] = field(default_factory=list)  # pages linked from the homepage menu
+    sitemap_url_count: int = 0  # page URLs found in the sitemaps (a rough site size)
 
     @property
     def partial(self) -> bool:
@@ -85,8 +87,12 @@ async def crawl(start_url: str, settings: Settings | None = None, client: httpx.
     if not start:
         raise CrawlError("Please enter a valid http(s) URL.")
     host = urlsplit(start).hostname or ""
-    if not settings.crawl_allow_private_hosts and not await asyncio.to_thread(urls.is_public_host, host):
-        raise CrawlError(f"Can't reach {host}: it doesn't resolve to a public address.")
+    if not settings.crawl_allow_private_hosts:
+        addresses = await asyncio.to_thread(urls.resolve_host, host)
+        if not addresses:
+            raise CrawlError(f"Couldn't find {host}. Check the address and try again.")
+        if not all(urls.is_public_ip(a) for a in addresses):
+            raise CrawlError(f"Can't reach {host}: it doesn't resolve to a public address.")
 
     if client:
         return await Crawler(start, settings, client).run()
@@ -121,6 +127,7 @@ class Crawler:
         self.pages: dict[str, Page] = {}
         self.failed: dict[str, str] = {}
         self.sitemaps: list[SitemapInfo] = []
+        self.sitemap_url_count = 0
 
     async def run(self) -> CrawlResult:
         started = time.monotonic()
@@ -147,6 +154,7 @@ class Crawler:
         self.section_counts[self._section(homepage)] += 1
         self._save_page(Candidate(homepage, depth=0, score=HOMEPAGE_SCORE), home, meta)
         self._queue_links(meta, homepage, depth=1, from_homepage=True)
+        nav_urls = [url for url, cand in self.candidates.items() if "nav" in cand.sources]
         await self._queue_sitemaps(sitemap_urls)
 
         # 3. Crawl.
@@ -171,6 +179,8 @@ class Crawler:
             failed=self.failed,
             stop_reason=stop_reason,
             duration_seconds=round(time.monotonic() - started, 2),
+            nav_urls=nav_urls,
+            sitemap_url_count=self.sitemap_url_count,
         )
 
     async def _follow_redirect(self, home: FetchResult, sitemap_urls: list[str]) -> tuple[str, list[str]]:
@@ -209,7 +219,10 @@ class Crawler:
             for cand, res in zip(batch, results, strict=True):
                 if res.error or res.status >= 400:
                     self._record_failure(cand, res)
-                    if res.transient or res.status == 403:
+                    # Only errors that suggest the site is struggling or rate-limiting us count.
+                    # A 403 on one page usually means it needs a login; a site that blocks us
+                    # entirely already failed at the homepage.
+                    if res.transient:
                         consecutive_errors += 1
                     saved = False
                 else:
@@ -228,23 +241,18 @@ class Crawler:
     def _next_batch(self, size: int) -> list[Candidate]:
         """Take up to `size` of the best unvisited URLs off the queue.
 
-        Scores drop as a section fills up, so a URL's score in the queue may be out of date.
-        We re-score each URL when it comes out; if it's no longer the best, it goes back in.
+        Each URL keeps the score it was given when it was queued.
         """
         batch: list[Candidate] = []
         while self.queue and len(batch) < size:
-            _, _, url = heapq.heappop(self.queue)
+            negative_score, _, url = heapq.heappop(self.queue)
             if url in self.visited:
-                continue
+                continue  # an older entry for a URL we've already taken
             section = self._section(url)
             if self.section_counts[section] >= self.cfg.crawl_section_ceiling:
                 continue  # we have enough pages from this section
             cand = self.candidates[url]
-            current = self._score(cand)
-            if self.queue and current < -self.queue[0][0]:
-                self._push(url, current)
-                continue
-            cand.score = current
+            cand.score = -negative_score
             self.visited.add(url)
             self.section_counts[section] += 1
             batch.append(cand)
@@ -365,7 +373,6 @@ class Crawler:
                 to_fetch.insert(0, f"{origin}{self.scope}/sitemap.xml")
 
         fetched: set[str] = set()
-        queued = 0
         while to_fetch and len(fetched) < self.cfg.crawl_max_sitemaps and time.monotonic() < self.deadline:
             sitemap_url = to_fetch.pop(0)
             if sitemap_url in fetched:
@@ -379,11 +386,11 @@ class Crawler:
             self.sitemaps.append(SitemapInfo(sitemap_url, res.headers.get("etag"), res.headers.get("last-modified")))
             to_fetch.extend(c for c in child_sitemaps if urls.same_site(c, self.host))
             for loc, priority in pages:
-                if queued >= self.cfg.crawl_max_sitemap_urls:
+                if self.sitemap_url_count >= self.cfg.crawl_max_sitemap_urls:
                     return
                 url = self._site_url(loc, crawlable=True)
                 if url:
-                    queued += 1
+                    self.sitemap_url_count += 1
                     self._add_candidate(url, depth=1, source="sitemap", sitemap_priority=priority)
 
     # ---------- helpers ----------

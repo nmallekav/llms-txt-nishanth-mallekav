@@ -44,6 +44,9 @@ def main() -> int:
         f"stopped: {crawl.stop_reason}, problems: {result.problems or 'none'}",
         file=sys.stderr,
     )
+    print(f"quality: {result.quality.score}/100", file=sys.stderr)
+    for check in result.quality.checks:
+        print(f"  {'ok  ' if check.status == 'ok' else 'warn'} {check.name}: {check.message}", file=sys.stderr)
     return 0
 
 

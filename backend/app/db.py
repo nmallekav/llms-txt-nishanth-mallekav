@@ -38,6 +38,9 @@ class Site(Base):
     summary: Mapped[str | None] = mapped_column(Text)
     # Sitemaps found in the last crawl: [{"url", "etag", "last_modified"}], re-checked by the monitor.
     sitemaps: Mapped[list] = mapped_column(JSON, default=list)
+    # From the last crawl, so a cached response can show the same stats and quality report.
+    crawl_stats: Mapped[dict | None] = mapped_column(JSON)
+    quality: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_checked_at: Mapped[datetime | None]
     last_crawled_at: Mapped[datetime | None]
@@ -127,6 +130,9 @@ def _upgrade(engine) -> None:
                 conn.execute(text(f"ALTER TABLE pages DROP COLUMN {column}"))
         if "md_url" not in page_columns:
             conn.execute(text("ALTER TABLE pages ADD COLUMN md_url VARCHAR"))
+        for column in ("crawl_stats", "quality"):
+            if column not in site_columns:
+                conn.execute(text(f"ALTER TABLE sites ADD COLUMN {column} JSON"))
 
 
 def init_db(url: str | None = None):

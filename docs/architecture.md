@@ -36,7 +36,8 @@ sequenceDiagram
 | `markdown.py` | Find `.md` versions of pages | [llms-txt-format.md](llms-txt-format.md) |
 | `extract.py` | Pull title, description, canonical, markdown alternate from HTML | [llms-txt-format.md](llms-txt-format.md#where-each-value-comes-from) |
 | `llmstxt.py` | Build + validate the llms.txt file | [llms-txt-format.md](llms-txt-format.md) |
-| `generate.py` | Glue: crawl, then build + validate | below |
+| `generate.py` | Glue: crawl, then build + validate + quality report | below |
+| `quality.py` | Score the generated file and list warnings | [code-walkthrough.md](code-walkthrough.md) |
 | `cli.py` | `python -m app.cli <url>` for local testing | README |
 | `monitor.py` | Scheduled ETag check, automatic re-crawl on change | [monitoring.md](monitoring.md) |
 | `db.py` | SQLAlchemy models and SQLite session | [database.md](database.md) |

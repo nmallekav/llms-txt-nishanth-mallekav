@@ -17,8 +17,12 @@ site changes and serving the latest version at a stable link.
    the site publishes one).
 3. **Generate:** builds a spec-compliant llms.txt (H1, summary, H2 link sections,
    `## Optional`) and validates it.
-4. **Monitor:** stored sites get a daily ETag check (conditional requests). If anything
+4. **Quality report:** scores the file out of 100 and flags weaknesses: pages without
+   descriptions, missing menu pages, no `.md` versions, oversized files, partial crawls.
+5. **Monitor:** stored sites get a daily ETag check (conditional requests). If anything
    changed, the site is re-crawled and a new version is saved if the file differs.
+6. **Cache:** generating a stored site that was checked in the last 24 hours returns the
+   saved version instantly. **Regenerate now** forces a fresh crawl (`"refresh": true` in the API).
 
 Design docs: [PLAN.md](PLAN.md) · [crawler](docs/crawler.md) · [output format](docs/llms-txt-format.md) ·
 [monitoring](docs/monitoring.md) · [database](docs/database.md) · [architecture](docs/architecture.md) ·
@@ -104,6 +108,7 @@ No API keys are needed: the app only fetches public pages.
 | `CRAWL_PROBE_MARKDOWN` | true | Look for `.md` versions of pages |
 | `SCORE_*` | see docs | Priority-queue weights ([crawler.md](docs/crawler.md#5-scoring-priority-queue)) |
 | `MONITOR_CHECK_INTERVAL_HOURS` | 24 | How often each stored site gets an ETag check |
+| `CACHE_MAX_AGE_HOURS` | 24 | Serve a stored site instantly if it was checked this recently (0 = always crawl) |
 | `MONITOR_FULL_CRAWL_TTL_DAYS` | 7 | Force a full re-crawl after this long (0 = off) |
 | `DATABASE_URL` | `sqlite:///data/llms.db` | SQLite file location |
 | `PUBLIC_BASE_URL` | (request host) | Base URL used in stable links |
@@ -112,7 +117,7 @@ No API keys are needed: the app only fetches public pages.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/generate` | `{"url": "...", "monitor": false}` → llms.txt, crawl stats, stable link if monitored |
+| POST | `/api/generate` | `{"url": "...", "monitor": false, "refresh": false}` → llms.txt, crawl stats, quality report, `cached`, stable link if monitored |
 | GET | `/s/{id}/llms.txt` | Latest llms.txt for a monitored site |
 | GET | `/docs` | Interactive API docs |
 
