@@ -150,7 +150,7 @@ class Crawler:
         nav_urls = [url for url, cand in self.candidates.items() if "nav" in cand.sources]
         await self._queue_sitemaps(self.robots.site_maps() or [])
 
-        # 4. Crawl.
+        # 4. Crawl.     
         stop_reason = await self._crawl_loop()
 
         return CrawlResult(

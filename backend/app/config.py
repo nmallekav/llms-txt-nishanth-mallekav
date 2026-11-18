@@ -91,7 +91,7 @@ DESCRIPTION_MAX_CHARS = _int("DESCRIPTION_MAX_CHARS", 200)
 # --- Monitoring (see docs/monitoring.md) ---
 MONITOR_ENABLED = _bool("MONITOR_ENABLED", False)  # off for now; set MONITOR_ENABLED=true to start the scheduler
 MONITOR_CHECK_INTERVAL_HOURS = _float("MONITOR_CHECK_INTERVAL_HOURS", 24)
-MONITOR_FULL_CRAWL_TTL_DAYS = _float("MONITOR_FULL_CRAWL_TTL_DAYS", 7)  # 0 disables the forced full crawl
+MONITOR_FULL_CRAWL_TTL_DAYS = _int("MONITOR_FULL_CRAWL_TTL_DAYS", 7)  # force a full crawl after this many days
 MONITOR_TICK_MINUTES = _float("MONITOR_TICK_MINUTES", 15)
 MONITOR_SITES_PER_TICK = _int("MONITOR_SITES_PER_TICK", 5)
 MONITOR_RETRY_HOURS = _float("MONITOR_RETRY_HOURS", 6)

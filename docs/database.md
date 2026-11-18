@@ -56,7 +56,7 @@ CREATE TABLE sites (
     url                 TEXT NOT NULL UNIQUE,      -- normalized start URL (may include a subpath)
     name                TEXT,                      -- site name from the last crawl
     status              TEXT NOT NULL DEFAULT 'active'
-                        CHECK (status IN ('active', 'paused', 'failing')),
+                        CHECK (status IN ('active', 'failing')),
     current_version_id  INTEGER REFERENCES site_versions(id),
     homepage_url        TEXT,                      -- homepage after redirects
     homepage_etag       TEXT,                      -- validators for the ETag check
@@ -72,7 +72,7 @@ CREATE TABLE sites (
     fail_count          INTEGER NOT NULL DEFAULT 0,
     last_error          TEXT
 );
-CREATE INDEX idx_sites_next_check ON sites (status, next_check_at);
+CREATE INDEX idx_sites_next_check ON sites (next_check_at);
 
 -- Every distinct llms.txt we have generated for a site. Newest = current.
 CREATE TABLE site_versions (

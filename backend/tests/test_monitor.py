@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from app.crawler import crawl
+from app import monitor
 from app.db import SessionLocal, Site, init_db
 from app.monitor import change_summary, process_site, store_site
 from tests.conftest import FakeSite, html
@@ -33,11 +34,19 @@ def start_monitoring(fake: FakeSite) -> str:
         return store_site(session, result).id
 
 
-def check(site_id, fake, force=False):
-    async def go():
-        async with fake.client() as client:
-            return await process_site(site_id, force=force, client=client)
-    return asyncio.run(go())
+def check(site_id, fake):
+    """Run the monitor check for one site against the fake website."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(monitor, "make_client", fake.client)
+        return asyncio.run(process_site(site_id))
+
+
+def make_crawl_due(site_id):
+    """Pretend the last full crawl was long ago, so the next check re-crawls."""
+    with SessionLocal() as session:
+        site = session.get(Site, site_id)
+        site.last_crawled_at = site.last_crawled_at.replace(year=2000)
+        session.commit()
 
 
 def get_site(site_id) -> Site:
@@ -120,7 +129,7 @@ def test_failed_check_is_not_a_change():
     fake.headers["/docs"] = {}
 
     assert check(site_id, fake) == "failed"
-    assert get_site(site_id).last_error == "HTTP 503: /docs"
+    assert get_site(site_id).last_error == "HTTP 503: https://acme.test/docs"
 
 
 def test_sitemaps_are_stored_and_checked():
@@ -141,8 +150,9 @@ def test_failed_crawl_keeps_version_and_schedules_retry():
     fake = make_site()
     site_id = start_monitoring(fake)
     fake.routes["/"] = (500, "text/html", "down")
+    make_crawl_due(site_id)
 
-    assert check(site_id, fake, force=True) == "failed"
+    assert check(site_id, fake) == "failed"
     with SessionLocal() as session:
         site = session.get(Site, site_id)
         assert site.fail_count == 1
@@ -153,10 +163,7 @@ def test_failed_crawl_keeps_version_and_schedules_retry():
 def test_ttl_forces_full_crawl():
     fake = make_site()
     site_id = start_monitoring(fake)
-    with SessionLocal() as session:
-        site = session.get(Site, site_id)
-        site.last_crawled_at = site.last_crawled_at.replace(year=2000)
-        session.commit()
+    make_crawl_due(site_id)
     fake.requests.clear()
     check(site_id, fake)
     assert get_site(site_id).last_crawled_at.year != 2000

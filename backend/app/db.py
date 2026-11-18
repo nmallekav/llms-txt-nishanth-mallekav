@@ -29,7 +29,7 @@ class Site(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_site_id)
     url: Mapped[str] = mapped_column(String, unique=True)
     name: Mapped[str | None] = mapped_column(String)
-    status: Mapped[str] = mapped_column(String, default="active")  # active | paused | failing
+    status: Mapped[str] = mapped_column(String, default="active")  # active | failing (3+ failed checks in a row)
     current_version_id: Mapped[int | None] = mapped_column(ForeignKey("site_versions.id", use_alter=True))
     homepage_url: Mapped[str | None] = mapped_column(String)
     homepage_etag: Mapped[str | None] = mapped_column(String)
@@ -49,7 +49,7 @@ class Site(Base):
     current_version: Mapped["SiteVersion | None"] = relationship(foreign_keys=[current_version_id], post_update=True)
     pages: Mapped[list["PageRow"]] = relationship(back_populates="site", cascade="all, delete-orphan")
 
-    __table_args__ = (Index("idx_sites_next_check", "status", "next_check_at"),)
+    __table_args__ = (Index("idx_sites_next_check", "next_check_at"),)
 
 
 class SiteVersion(Base):

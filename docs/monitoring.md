@@ -41,10 +41,10 @@ flowchart TD
 - Each site has `next_check_at`. After every check, `next_check_at = now + MONITOR_CHECK_INTERVAL_HOURS`
   (default **24**).
 - An APScheduler job ticks every `MONITOR_TICK_MINUTES` (default 15) and processes up to
-  `MONITOR_SITES_PER_TICK` sites where `status != 'paused' AND next_check_at <= now`.
+  `MONITOR_SITES_PER_TICK` sites where `next_check_at <= now`.
   Sites are checked around the time of day they were added, so checks spread out naturally.
 - **Full-crawl backstop:** if a site's last full crawl is older than
-  `MONITOR_FULL_CRAWL_TTL_DAYS` (default **7**, `0` disables it), it is re-crawled even if
+  `MONITOR_FULL_CRAWL_TTL_DAYS` (default **7**), it is re-crawled even if
   every ETag returned `304`. See [why](#why-keep-the-full-crawl-backstop).
 
 ## The ETag check
@@ -73,9 +73,10 @@ Then read the response:
 | `404` / `410` | Page removed, so changed |
 | Timeout / `5xx` / connection error | Check failed, not a change. Retry later. |
 
-The check **stops at the first changed URL** and starts the re-crawl, so an unchanged
+URLs are checked one by one. The check **stops at the first changed URL** and starts the
+re-crawl (or at the first failure, and retries later), so an unchanged
 site costs one request per URL, almost all of them bodiless `304`s. The URL that
-triggered it is written to the log, e.g. `etag changed: /pricing`.
+triggered it is written to the log, e.g. `HTTP 200: https://example.com/pricing`.
 
 ### Is the ETag reliable?
 
@@ -151,7 +152,7 @@ e.g. `+3 pages, −1 page, 2 descriptions changed`, stored in `site_versions.cha
 | Setting | Default | Meaning |
 |---|---|---|
 | `MONITOR_CHECK_INTERVAL_HOURS` | 24 | How often each site gets an ETag check |
-| `MONITOR_FULL_CRAWL_TTL_DAYS` | 7 | Force a full crawl after this long; `0` disables |
+| `MONITOR_FULL_CRAWL_TTL_DAYS` | 7 | Force a full crawl after this many days |
 | `MONITOR_TICK_MINUTES` | 15 | How often the scheduler looks for due sites |
 | `MONITOR_SITES_PER_TICK` | 5 | Max sites processed per tick |
 | `MONITOR_RETRY_HOURS` | 6 | Retry delay after a failed check or crawl |

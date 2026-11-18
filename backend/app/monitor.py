@@ -7,12 +7,10 @@ Every few minutes the scheduler picks the sites that are due (about once a day e
 3. Saves a new version only if the generated llms.txt is different.
 """
 
-import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -129,50 +127,30 @@ class _Target:
 
 
 async def etag_check(targets: list[_Target], client: httpx.AsyncClient) -> tuple[str, str | None]:
-    """Conditional GETs for each target. Returns ("unchanged" | "changed" | "failed", reason).
+    """Ask the server if each saved URL changed, without downloading it.
 
-    Stops at the first changed URL. A URL with no ETag or Last-Modified counts as changed.
+    Returns ("unchanged" | "changed" | "failed", reason). Stops at the first change or failure.
     """
-    first_failure: str | None = None
-    size = max(1, config.CRAWL_CONCURRENCY)
-    for i in range(0, len(targets), size):
-        batch = targets[i:i + size]
-        outcomes = await asyncio.gather(*(_check_one(t, client) for t in batch))
-        for outcome, reason in outcomes:
-            if outcome == "changed":
-                return "changed", reason
-            if outcome == "failed" and first_failure is None:
-                first_failure = reason
-    if first_failure:
-        return "failed", first_failure
+    for t in targets:
+        if t.etag:
+            headers = {"If-None-Match": t.etag}
+        elif t.last_modified:
+            headers = {"If-Modified-Since": t.last_modified}
+        else:
+            return "changed", f"no ETag or Last-Modified: {t.url}"
+        try:
+            async with client.stream("GET", t.url, headers=headers) as r:  # headers only, no body
+                status, etag = r.status_code, r.headers.get("etag")
+        except httpx.HTTPError as e:
+            return "failed", f"{type(e).__name__}: {t.url}"
+
+        # 304 = not modified. A 200 with the same ETag also means unchanged (some CDNs ignore If-None-Match).
+        if status == 304 or (status == 200 and t.etag and etag == t.etag):
+            continue
+        if status in (200, 404, 410):  # new content, or the page was removed
+            return "changed", f"HTTP {status}: {t.url}"
+        return "failed", f"HTTP {status}: {t.url}"
     return "unchanged", None
-
-
-async def _check_one(t: _Target, client: httpx.AsyncClient) -> tuple[str, str]:
-    path = urlsplit(t.url).path or "/"
-    if t.etag:
-        headers = {"If-None-Match": t.etag}
-    elif t.last_modified:
-        headers = {"If-Modified-Since": t.last_modified}
-    else:
-        return "changed", f"no ETag or Last-Modified: {path}"
-    try:
-        async with client.stream("GET", t.url, headers=headers, timeout=config.CRAWL_REQUEST_TIMEOUT_SECONDS) as r:
-            status = r.status_code
-            etag, last_modified = r.headers.get("etag"), r.headers.get("last-modified")
-    except httpx.HTTPError as e:
-        return "failed", f"{type(e).__name__}: {path}"
-    if status == 304:
-        return "unchanged", path
-    if status == 200:
-        # Some servers/CDNs ignore conditional headers and always send 200; the same
-        # validator in the response still means the same content.
-        if (t.etag and etag == t.etag) or (not t.etag and last_modified and last_modified == t.last_modified):
-            return "unchanged", path
-        return "changed", f"etag changed: {path}"
-    if status in (404, 410):
-        return "changed", f"removed ({status}): {path}"
-    return "failed", f"HTTP {status}: {path}"
 
 
 def _targets(site: Site) -> list[_Target]:
@@ -207,18 +185,8 @@ def _mark_failure(site: Site, error: str) -> None:
         site.next_check_at = now + timedelta(hours=config.MONITOR_RETRY_HOURS)
 
 
-async def process_site(site_id: str, force: bool = False, client: httpx.AsyncClient | None = None) -> str:
-    """Check one site and re-crawl it if needed. Returns "unchanged", "changed", "failed" or "missing".
-
-    force: skip the ETag check and always re-crawl.
-    """
-    if client:
-        return await _process(site_id, force, client)
-    async with make_client() as client:
-        return await _process(site_id, force, client)
-
-
-async def _process(site_id: str, force: bool, client: httpx.AsyncClient) -> str:
+async def process_site(site_id: str) -> str:
+    """Check one site and re-crawl it if needed. Returns "unchanged", "changed", "failed" or "missing"."""
     # 1. Read what we need, then close the session while doing network work.
     with SessionLocal() as session:
         site = session.get(Site, site_id)
@@ -226,36 +194,36 @@ async def _process(site_id: str, force: bool, client: httpx.AsyncClient) -> str:
             return "missing"
         url = site.url
         targets = _targets(site)
-        ttl = config.MONITOR_FULL_CRAWL_TTL_DAYS
-        full_crawl_due = ttl > 0 and (site.last_crawled_at is None
-                                      or utcnow() - site.last_crawled_at >= timedelta(days=ttl))
+        # Days since the last full crawl. A full crawl is forced once this reaches the TTL.
+        days_since_crawl = (utcnow() - site.last_crawled_at).days
+        full_crawl_due = days_since_crawl >= config.MONITOR_FULL_CRAWL_TTL_DAYS
 
-    # 2. Decide whether to re-crawl.
-    if force:
-        reason = "forced"
-    elif full_crawl_due:
-        reason = f"full re-crawl every {ttl:g} days"
-    else:
-        outcome, reason = await etag_check(targets, client)
-        if outcome != "changed":
+    async with make_client() as client:
+        # 2. Decide whether to re-crawl.
+        if full_crawl_due:
+            reason = f"last full crawl was {days_since_crawl} days ago"
+        else:
+            outcome, reason = await etag_check(targets, client)
+            if outcome != "changed":
+                with SessionLocal() as session:
+                    site = session.get(Site, site_id)
+                    if outcome == "unchanged":
+                        _mark_success(site)
+                    else:
+                        _mark_failure(site, reason)
+                    session.commit()
+                return outcome
+
+        # 3. Re-crawl.
+        try:
+            result = await crawl(url, client)
+        except CrawlError as e:
             with SessionLocal() as session:
-                site = session.get(Site, site_id)
-                if outcome == "unchanged":
-                    _mark_success(site)
-                else:
-                    _mark_failure(site, reason or "check failed")
+                _mark_failure(session.get(Site, site_id), str(e))
                 session.commit()
-            return outcome
+            return "failed"
 
-    # 3. Re-crawl and save.
-    try:
-        result = await crawl(url, client)
-    except CrawlError as e:
-        with SessionLocal() as session:
-            _mark_failure(session.get(Site, site_id), str(e))
-            session.commit()
-        return "failed"
-
+    # 4. Save.
     with SessionLocal() as session:
         site = session.get(Site, site_id)
         changed, summary = save_crawl(session, site, result)
@@ -272,7 +240,7 @@ async def tick() -> None:
     with SessionLocal() as session:
         due = session.scalars(
             select(Site.id)
-            .where(Site.status != "paused", Site.next_check_at <= utcnow())
+            .where(Site.next_check_at <= utcnow())
             .order_by(Site.next_check_at)
             .limit(config.MONITOR_SITES_PER_TICK)
         ).all()

@@ -207,7 +207,7 @@ s.addText("The whole app in pseudocode", { placeholder: "title" });
   card("Every 15 minutes (scheduler)", 2, 6.95, 1.45, 5.75, 2.95, [
     ["Find sites whose next check is due"],
     ["Last full crawl 7+ days ago → re-crawl"],
-    ["Otherwise send the saved ETags, 5 at a time:"],
+    ["Otherwise send the saved ETags:"],
     ["all unchanged → next check in 24h · failed → retry in 6h", 1],
     ["something changed → re-crawl", 1],
     ["Same file → keep it; different → save a new version"],
@@ -282,7 +282,7 @@ s.addText("How the scheduler keeps files fresh", { placeholder: "title" });
 text(s, "A cheap ETag check decides when to pay for a crawl; the file hash decides whether to publish.", 0.6, 1.35, 12.1, 0.5, { fontSize: 18, color: C.text2 });
 const flow = [
   ["Tick every 15 min", "APScheduler finds up to 5 sites with next_check_at ≤ now"],
-  ["ETag check", "Conditional GET (If-None-Match / If-Modified-Since) for homepage, sitemaps and listed pages, 5 at a time; stops at the first change"],
+  ["ETag check", "Conditional GET (If-None-Match / If-Modified-Since) for homepage, sitemaps and listed pages; stops at the first change"],
   ["Re-crawl if changed", "Any 200/404/410, or the last full crawl is over 7 days old"],
   ["Publish only if different", "New version saved only when sha256(llms.txt) changes, with a summary like “+3 pages, 2 descriptions changed”"],
 ];

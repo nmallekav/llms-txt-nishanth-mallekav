@@ -333,7 +333,7 @@ Runs after the file is built, using the crawl result and the text. No extra requ
 | Section names, Optional rules, formatting | `llmstxt.py` |
 | Quality checks and score | `quality.py` |
 | How often sites are checked | `MONITOR_*` settings |
-| What counts as "changed" | `monitor._check_one()` |
+| What counts as "changed" | `monitor.etag_check()` |
 | API responses | `main.py` |
 
 ---
