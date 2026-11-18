@@ -251,10 +251,11 @@ Each URL is scored when it's found, and re-scored if it's found again. The rules
 **Build:**
 1. Drop the homepage (its name and summary become the H1 and blockquote).
 2. Remove descriptions shared by 3+ pages (a site-wide default, not a real description).
-3. Remove duplicate pages.
-4. Put legal/careers pages aside for `## Optional`.
-5. Group the rest into sections: Main, one section per folder, Other for single pages.
-6. Write `# Name`, `> summary`, each `## Section` with its links, then `## Optional`.
+3. Sort the pages by score, best first.
+4. Group them into sections: legal/careers pages into `Optional`, top-level pages into `Main`,
+   the rest by folder.
+5. Write `# Name`, `> summary`, then `## Main`, the other sections (best first) and `## Optional` last.
+   Each link is `- [Title](url): description`, with the description cut at 200 characters.
 
 **Validate:**
 1. Check the first line is the H1.

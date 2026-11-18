@@ -386,7 +386,7 @@ const cards = [
   ["Pages we skip", ["Login, cart, checkout, search, admin", "?page=2, /tag/, /category/, date archives", "Other-language copies (/fr/, /de/)", "PDFs, images, non-HTML, noindex"]],
   ["Politeness and limits", ["robots.txt rules", "10s per request, 5 redirects max", "2 MB body cap, 5 sitemap files max", "Identifying User-Agent"]],
   ["Failures", ["Homepage fails → clear error, no partial file", "A page that fails later is skipped", "45s budget → return what we have"]],
-  ["Output quality", ["Boilerplate descriptions on 3+ pages removed", "One-page sections grouped into “Other”", "Sorted by score, then URL: deterministic", "Failed re-crawl never overwrites a version"]],
+  ["Output quality", ["Boilerplate descriptions on 3+ pages removed", "Legal and careers pages go in “Optional”, last", "Sorted by score, then URL: deterministic", "Failed re-crawl never overwrites a version"]],
 ];
 cards.forEach(([h, items], i) => {
   const col = i % 3, row = Math.floor(i / 3);

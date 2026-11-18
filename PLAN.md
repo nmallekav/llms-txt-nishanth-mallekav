@@ -85,8 +85,8 @@ check for the same name, summary, sections and key pages. → [docs/testing.md](
 - URLs with no ETag or Last-Modified count as changed (correct, just not cheap). A 7-day full crawl (configurable) backstops what ETags can't see.
 - Fresh git repo for this project (the current repo root is the home folder).
 - `hello.py` is unrelated and has a hardcoded token, so it stays out of the repo.
-- Site-wide boilerplate descriptions (the same text on 3+ pages) are replaced by each page's own fallback (og:description or first paragraph).
-- One-page sections are collected into an "Other" section instead of many tiny ones; date-based blog paths (`/2024/05/post`) group as "Posts".
+- Site-wide boilerplate descriptions (the same text on 3+ pages) are left out.
+- Sections come from the first path segment; date-based blog paths (`/2024/05/post`) group as "Posts".
 - ETag check also treats a `200` with the *same* ETag as unchanged: some CDNs (seen on Cloudflare) ignore `If-None-Match`.
 - Crawler refuses private/loopback addresses (SSRF protection), configurable with `CRAWL_ALLOW_PRIVATE_HOSTS`.
 - No API keys are needed in v1; `.env` holds all tunable settings, with `.env.example` committed.

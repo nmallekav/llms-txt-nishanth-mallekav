@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from . import config, llmstxt, quality
+from . import llmstxt, quality
 from .crawler import CrawlResult, crawl
 
 
@@ -15,14 +15,7 @@ class Generated:
 
 
 def render(result: CrawlResult) -> str:
-    return llmstxt.build(
-        site_name=result.site_name,
-        summary=result.summary,
-        pages=result.pages,
-        homepage_url=result.homepage_url,
-        scope_path=result.scope_path,
-        description_max_chars=config.DESCRIPTION_MAX_CHARS,
-    )
+    return llmstxt.build(result.site_name, result.summary, result.pages, result.homepage_url)
 
 
 async def generate(url: str) -> Generated:

@@ -71,8 +71,7 @@ Run on 2026-11-14 with default settings (50-page budget).
   pages chosen by a human; we pick the top ~50 on-site pages by score. Raising
   `CRAWL_MAX_PAGES` increases overlap on big docs sites at the cost of crawl time.
 - Fixes made because of this testing: `og:site_name` taglines are stripped ("APIstax - Secure
-  and reliable APIs" → "APIstax"), plural acronyms are cased correctly ("APIs"), and
-  site-wide boilerplate descriptions are replaced with page-specific text.
+  and reliable APIs" → "APIstax"), and site-wide boilerplate descriptions are left out.
 
 ---
 

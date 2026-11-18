@@ -1,3 +1,4 @@
+from app import config
 from app.llmstxt import Entry, build, validate
 
 
@@ -28,11 +29,11 @@ def test_build_matches_spec_layout():
         "## Main\n"
         "\n"
         "- [Pricing](https://acme.com/pricing): Plans for teams.\n"
+        "- [Docs](https://acme.com/docs): All the docs.\n"
         "- [About](https://acme.com/about): The team.\n"
         "\n"
         "## Docs\n"
         "\n"
-        "- [Docs](https://acme.com/docs): All the docs.\n"
         "- [Quickstart](https://acme.com/docs/quickstart.md): Install it.\n"
         "- [API Reference](https://acme.com/docs/api): Endpoints.\n"
         "\n"
@@ -40,16 +41,6 @@ def test_build_matches_spec_layout():
         "\n"
         "- [Privacy Policy](https://acme.com/privacy): How we use data.\n"
     )
-    assert validate(text) == []
-
-
-def test_single_page_sections_go_to_other():
-    pages = [
-        entry("/blog/a", "A", score=10), entry("/blog/b", "B", score=9),
-        entry("/careers-team/x", "Lonely", score=20),
-    ]
-    text = build("Acme", None, pages)
-    assert "## Blog" in text and "## Other\n\n- [Lonely]" in text
     assert validate(text) == []
 
 
@@ -61,28 +52,26 @@ def test_boilerplate_descriptions_are_dropped():
     assert "- [P0](https://acme.com/docs/p0)\n" in text
 
 
-def test_escaping_and_truncation():
+def test_escaping_and_truncation(monkeypatch):
+    monkeypatch.setattr(config, "DESCRIPTION_MAX_CHARS", 30)
     pages = [entry("/a b", "Use [brackets]", "word " * 100)]
-    line = build("Acme", None, pages, description_max_chars=30).splitlines()[-1]
+    line = build("Acme", None, pages).splitlines()[-1]
     assert line.startswith(r"- [Use \[brackets\]](https://acme.com/a%20b): word")
     assert line.endswith("…")
     assert len(line.split(": ", 1)[1]) <= 31
 
 
-def test_note_equal_to_title_is_dropped():
-    text = build("Acme", None, [entry("/faq", "FAQ", "FAQ")])
-    assert "- [FAQ](https://acme.com/faq)\n" in text
-
-
 def test_section_names():
-    pages = [entry("/apis/a", "A"), entry("/apis/b", "B"), entry("/getting-started/a", "C"), entry("/getting-started/b", "D")]
+    pages = [entry("/getting-started/a", "C"), entry("/user_guide/b", "D")]
     text = build("Acme", None, pages)
-    assert "## APIs" in text and "## Getting Started" in text
+    assert "## Getting Started" in text and "## User Guide" in text
 
 
-def test_reserved_section_names_are_renamed():
-    pages = [entry("/optional/a", "A"), entry("/optional/b", "B")]
-    assert "## Optional Pages" in build("Acme", None, pages)
+def test_optional_pages_go_last():
+    pages = [entry("/legal/privacy.html", "Privacy", score=99), entry("/docs/a", "A", score=1)]
+    text = build("Acme", None, pages)
+    assert text.index("## Docs") < text.index("## Optional")
+    assert validate(text) == []
 
 
 def test_validate_catches_problems():

@@ -49,15 +49,14 @@ Hard constraints the generator enforces:
 
 ## Cleaning text
 
-- Collapse whitespace and newlines into single spaces (each entry must be one line).
-- Trim notes to ~200 characters at a word boundary, adding `…` if cut.
-- Escape `[` and `]` in link titles; percent-encode spaces and `)` in URLs.
-- Drop notes that just repeat the title.
+- Whitespace and newlines are collapsed into single spaces when the page is read
+  (`extract.py`), so each entry is one line.
+- Trim notes to 200 characters (summary: 300) at a word boundary, adding `…` if cut.
+- Escape `[` and `]` in link titles; percent-encode spaces, `(` and `)` in URLs.
 - **Boilerplate descriptions:** if 3+ pages share the same description (a site-wide default
-  meta tag), each of those pages uses its own fallback instead (`og:description`, then
-  first paragraph), or no note.
+  meta tag), it is left out for those pages: the link has no note.
 - The homepage itself is not listed: its name and summary are the H1 and blockquote.
-- Drop duplicate entries (same URL, or same title + notes).
+- Each URL appears once (the crawler stores one page per URL).
 
 ## Grouping into sections
 
@@ -65,15 +64,10 @@ Hard constraints the generator enforces:
    `/blog/...` → **Blog**.
 2. Section names are title-cased with `-`/`_` turned into spaces
    (`getting-started` → **Getting Started**).
-3. Top-level pages (`/about`, `/pricing`) go into a **Main** section, listed first. A
-   top-level page that is a section's overview (`/blog` when `/blog/*` exists) goes into
-   that section, listed first.
-4. Sections with only one page are collected into one **Other** section (before Optional)
-   instead of many one-line sections.
-5. Remaining sections are ordered by their highest page score from the crawler.
+3. Top-level pages (`/about`, `/pricing`, `/docs`) go into a **Main** section, listed first.
+4. Legal and other secondary pages go into **Optional**, listed last (see below).
+5. The other sections are ordered by their highest page score from the crawler.
 6. Within a section, pages are ordered by crawler score (ties by URL, so output is deterministic).
-7. A section is never named `Optional`, `Main` or `Other` by accident; a site path `/optional` becomes **Optional Pages**.
-8. Acronyms are kept upper case, including plurals: `api` → **API**, `apis` → **APIs**.
 
 ## What goes in `## Optional`
 
