@@ -20,18 +20,20 @@ export interface Quality {
 export interface GenerateResponse {
   llms_txt: string
   url: string
-  stats: CrawlStats
+  stats: CrawlStats | null // null for a saved copy
   problems: string[]
-  quality: Quality
+  quality: Quality | null // null for a saved copy
   site_id: string | null
   stable_url: string | null
+  cached_at: string | null // set when this is a saved copy: when it was crawled
 }
 
-export async function generate(url: string, monitor: boolean): Promise<GenerateResponse> {
+// refresh = true crawls again even if a recent saved copy exists.
+export async function generate(url: string, monitor: boolean, refresh = false): Promise<GenerateResponse> {
   const res = await fetch('/api/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, monitor }),
+    body: JSON.stringify({ url, monitor, refresh }),
   })
   if (!res.ok) {
     const body = await res.json().catch(() => null)

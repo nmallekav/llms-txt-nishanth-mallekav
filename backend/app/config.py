@@ -50,6 +50,8 @@ DATABASE_URL = _str("DATABASE_URL", f"sqlite:///{REPO_ROOT / 'data' / 'llms.db'}
 PUBLIC_BASE_URL = _str("PUBLIC_BASE_URL", "")
 FRONTEND_DIST = _str("FRONTEND_DIST", str(REPO_ROOT / "frontend" / "dist"))
 LOG_LEVEL = _str("LOG_LEVEL", "INFO")
+# Generate returns the saved file for a stored site crawled less than this long ago (0 = always crawl).
+CACHE_HOURS = _float("CACHE_HOURS", 24)
 
 # --- Crawl limits ---
 CRAWL_MAX_PAGES = _int("CRAWL_MAX_PAGES", 50)

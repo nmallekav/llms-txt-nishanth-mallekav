@@ -12,7 +12,11 @@ sequenceDiagram
     participant S as Target site
     participant DB as Database
 
-    UI->>API: POST /api/generate {url, monitor}
+    UI->>API: POST /api/generate {url, monitor, refresh}
+    opt site stored and crawled < CACHE_HOURS ago (and not refresh)
+        API->>DB: read saved llms.txt
+        API-->>UI: {llms_txt, cached_at}
+    end
     API->>C: crawl(url)
     C->>S: GET /robots.txt, sitemaps, homepage
     C->>S: GET pages (best-first, concurrent)

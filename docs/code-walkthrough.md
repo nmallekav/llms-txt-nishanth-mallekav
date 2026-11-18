@@ -123,7 +123,11 @@ sequenceDiagram
     participant Mo as monitor.py
     participant DB as SQLite
 
-    UI->>M: POST /api/generate {url, monitor}
+    UI->>M: POST /api/generate {url, monitor, refresh}
+    opt stored site crawled < CACHE_HOURS ago, refresh = false
+        M->>DB: read saved llms.txt
+        M-->>UI: llms_txt, cached_at (no crawl)
+    end
     M->>G: generate(url)
     G->>C: crawl(url) → Crawler.run()
     C-->>G: CrawlResult (pages, sitemaps, etags)
@@ -154,10 +158,12 @@ Each section lists the high-level steps of what happens; see the code for detail
   1. Open the SQLite database **→ `db.init_db()`**
   2. Start the daily scheduler **→ `monitor.start_scheduler()`**
 - **Generate request** (`POST /api/generate`):
-  1. Crawl the site and build the file **→ `generate.generate()`**
-  2. If the site can't be crawled, return the error message to the UI.
-  3. If "keep it up to date" is ticked, or the site is already stored, save it **→ `monitor.store_site()`**
-  4. Return the llms.txt, crawl stats, quality report, and the stable link if monitored.
+  1. If the site is stored and was crawled less than `CACHE_HOURS` (24) ago, return the saved
+     file with `cached_at` and skip the crawl. The Regenerate button sends `refresh: true` to skip this step.
+  2. Crawl the site and build the file **→ `generate.generate()`**
+  3. If the site can't be crawled, return the error message to the UI.
+  4. If "keep it up to date" is ticked, or the site is already stored, save it **→ `monitor.store_site()`**
+  5. Return the llms.txt, crawl stats, quality report, and the stable link if monitored.
 - **Stable link** (`GET /s/{id}/llms.txt`): look up the site and return its latest llms.txt **→ `db`**
 - **Everything else:** serve the React app.
 
@@ -319,6 +325,7 @@ Runs after the file is built, using the crawl result and the text. No extra requ
 1. The user enters a URL and optionally ticks "keep it up to date".
 2. Send it to the backend **→ `POST /api/generate` in `main.py`**
 3. Show a loading message, then the result: crawl stats, warnings, the stable link, and the file with Copy and Download buttons.
+   A saved copy shows when it was crawled and a **Regenerate** button that crawls again.
 4. If the API returns an error, show its message.
 
 ---

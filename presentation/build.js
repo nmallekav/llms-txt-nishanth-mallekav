@@ -192,6 +192,7 @@ s.addText("The whole app in pseudocode", { placeholder: "title" });
     text(s, pc(items), x + 0.25, y + 0.78, w - 0.45, h - 0.9, { color: C.text2 });
   };
   card("User clicks Generate", 1, 0.6, 1.45, 6.1, 5.3, [
+    ["Stored and crawled in the last 24h → return the saved copy (Regenerate crawls again)"],
     ["Clean the URL; refuse invalid or private / internal addresses"],
     ["Read robots.txt: keep its rules and Sitemap lines"],
     ["Fetch the homepage (error if it fails); read site name and summary"],
@@ -200,8 +201,7 @@ s.addText("The whole app in pseudocode", { placeholder: "title" });
     ["take the 5 highest-scoring and fetch them in parallel", 1],
     ["skip failed, non-HTML, duplicate and noindex pages", 1],
     ["save title, description and ETag; score its links as new candidates", 1],
-    ["Link to .md versions where the page declares one"],
-    ["Build llms.txt, check it against the spec, score its quality"],
+    ["Build llms.txt (.md links where declared), check it, score its quality"],
     ["Show the file and quality report (Copy / Download)"],
   ]);
   card("Every 15 minutes (scheduler)", 2, 6.95, 1.45, 5.75, 2.95, [
@@ -397,6 +397,53 @@ cards.forEach(([h, items], i) => {
   text(s, bullets(items, 14), x + 0.25, y + 0.8, 3.5, 1.75, { color: C.text2 });
 });
 s.addNotes("Highlight the failure handling card: the crawler never raises on a bad page; the fetcher returns error codes and that page is skipped. Tests use httpx.MockTransport fake sites so these cases run without the network.");
+
+// ---------- 8b. Quality report (extra feature) ----------
+pres.addSection({ title: "Quality report" });
+s = pres.addSlide({ masterName: "Title Only", sectionTitle: "Quality report" });
+s.addText("Extra: a quality report for every file", { placeholder: "title" });
+{
+  // left: what it is
+  box(s, 0.6, 1.45, 3.7, 5.35, { fill: C.text1, name: "quality-panel" });
+  text(s, "Quality score", 0.9, 1.7, 3.1, 0.4, { fontSize: 16, bold: true, color: C.accent3 });
+  text(s, [
+    { text: "100", options: { fontSize: 60, bold: true, color: C.accent1 } },
+    { text: " − penalties", options: { fontSize: 20, color: C.background1 } },
+  ], 0.9, 2.1, 3.2, 1.1, { valign: "middle" });
+  text(s, bullets([
+    "Runs on every generate, shown next to the file",
+    "Uses the crawl result and the text only: no extra requests",
+    "Each check is ok or warn with a short message",
+    "Tells the site owner what to fix, not just what we found",
+  ], 14).map((r) => ({ ...r, options: { ...r.options, paraSpaceAfter: 10 } })), 0.9, 3.4, 3.15, 3.2, { color: C.background1 });
+
+  // right: the 8 checks, ordered by how many points they can cost
+  const checks = [
+    ["Spec", "Passes validate(): one H1, link lists, no H3+, Optional last", 40, ""],
+    ["Descriptions", "Share of links with a description (warn under 80%)", 30, "up to "],
+    ["Key pages", "Homepage menu pages are in the file (menus over 30 links not counted)", 15, "up to "],
+    ["Size", "About 10k tokens or less, so it fits in an agent's context", 10, ""],
+    ["Coverage", "Crawl finished before the 45s limit; a 50-page cap only warns", 10, ""],
+    ["Unique descriptions", "No site-wide default description on 3+ pages", 5, ""],
+    ["Markdown links", "The site publishes .md versions of its pages", 5, ""],
+    ["Structure", "Between 1 and 12 sections", 5, ""],
+  ];
+  const X0 = 4.6, barX = 11.25, unit = 0.033;
+  text(s, "Check", X0, 1.45, 2.0, 0.3, { fontSize: 12, bold: true, color: C.accent3 });
+  text(s, "What it looks at", X0 + 2.1, 1.45, 4.3, 0.3, { fontSize: 12, bold: true, color: C.accent3 });
+  text(s, "Points lost", barX - 0.75, 1.45, 2.2, 0.3, { fontSize: 12, bold: true, color: C.accent3 });
+  checks.forEach(([n, d, p, pre], i) => {
+    const y = 1.85 + i * 0.56;
+    if (i % 2 === 0) box(s, X0 - 0.15, y - 0.02, 8.25, 0.52, { fill: C.background2, r: 0.06, name: "check-row" });
+    text(s, n, X0, y, 2.0, 0.5, { fontSize: 15, bold: true, valign: "middle" });
+    text(s, d, X0 + 2.1, y, 4.3, 0.5, { fontSize: 12, color: C.text2, valign: "middle" });
+    text(s, (pre ? "≤" : "") + "−" + p, barX - 0.75, y, 0.65, 0.5, { fontSize: 14, bold: true, valign: "middle", align: "right" });
+    s.addShape(pres.shapes.RECTANGLE, { x: barX, y: y + 0.13, w: p * unit, h: 0.24, fill: { color: C.accent1 }, line: { type: "none" }, objectName: name("penalty-bar") });
+  });
+  box(s, X0 - 0.15, 6.85 - 0.5, 8.25, 0.45, { fill: C.accent6, name: "quality-note" });
+  text(s, "Descriptions and key pages lose points in proportion: 6 of 10 described costs 12, not 30.", X0, 6.35, 7.9, 0.45, { fontSize: 13, valign: "middle" });
+}
+s.addNotes("Beyond the brief: backend/app/quality.py scores each generated llms.txt out of 100. The spec check is the biggest penalty because an invalid file is the worst outcome. Descriptions and key pages are proportional. Coverage only costs points when the 45s time limit cut the crawl short; hitting the 50-page cap on a big site is a warning without a penalty. This is where it connects to Profound: it tells a brand what to fix so AI models read their site well.");
 
 // ---------- 9. Next steps ----------
 pres.addSection({ title: "Next steps" });

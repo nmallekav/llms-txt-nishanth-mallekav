@@ -15,19 +15,22 @@ export default function App() {
   const [result, setResult] = useState<GenerateResponse | null>(null)
   const [copied, setCopied] = useState(false)
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!url.trim()) return
+  async function run(refresh: boolean) {
     setLoading(true)
     setError(null)
     setResult(null)
     try {
-      setResult(await generate(url.trim(), monitor))
+      setResult(await generate(url.trim(), monitor, refresh))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
+  }
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (url.trim()) run(false)
   }
 
   async function copy() {
@@ -88,34 +91,44 @@ export default function App() {
       {result && (
         <section className="card result">
           <div className="result-head">
-            <p className="muted">
-              {result.stats.pages} pages · {result.stats.duration_seconds}s · {STOP_REASONS[result.stats.stop_reason]}
-            </p>
+            {result.stats && (
+              <p className="muted">
+                {result.stats.pages} pages · {result.stats.duration_seconds}s · {STOP_REASONS[result.stats.stop_reason]}
+              </p>
+            )}
+            {result.cached_at && (
+              <p className="muted">Saved copy from {new Date(result.cached_at).toLocaleString()}</p>
+            )}
             <div className="actions">
               <button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
               <button type="button" onClick={download}>Download</button>
+              {result.cached_at && (
+                <button type="button" onClick={() => run(true)}>Regenerate</button>
+              )}
             </div>
           </div>
 
-          {result.stats.partial && (
+          {result.stats?.partial && (
             <p className="warning">The crawl was cut short, so this file may be missing some pages.</p>
           )}
           {result.problems.length > 0 && (
             <p className="warning">Spec check found problems: {result.problems.join(' ')}</p>
           )}
-          <div className="quality">
-            <p className="quality-score">
-              Quality <strong>{result.quality.score}</strong>/100
-            </p>
-            <ul>
-              {result.quality.checks.map((check) => (
-                <li key={check.name} className={check.status}>
-                  <span className="icon" aria-hidden="true">{check.status === 'ok' ? '✓' : '!'}</span>
-                  <span><strong>{check.name}:</strong> {check.message}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {result.quality && (
+            <div className="quality">
+              <p className="quality-score">
+                Quality <strong>{result.quality.score}</strong>/100
+              </p>
+              <ul>
+                {result.quality.checks.map((check) => (
+                  <li key={check.name} className={check.status}>
+                    <span className="icon" aria-hidden="true">{check.status === 'ok' ? '✓' : '!'}</span>
+                    <span><strong>{check.name}:</strong> {check.message}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {result.stable_url && (
             <p className="stable">

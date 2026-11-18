@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app import main
+from app import config, main
 from app.crawler import CrawlError, CrawlResult, Page
 from app.db import init_db
 from app.generate import Generated
@@ -73,6 +73,34 @@ def test_generating_a_monitored_site_again_updates_it(monkeypatch):
     calls = []
     with client(monkeypatch, calls=calls) as c:
         first = c.post("/api/generate", json={"url": "acme.test", "monitor": True}).json()
-        again = c.post("/api/generate", json={"url": "acme.test"}).json()
+        again = c.post("/api/generate", json={"url": "acme.test", "refresh": True}).json()
     assert len(calls) == 2  # crawled both times
     assert again["site_id"] == first["site_id"]  # already monitored, so the stored copy was updated
+    assert again["cached_at"] is None
+
+
+def test_recently_crawled_site_returns_saved_copy(monkeypatch):
+    calls = []
+    with client(monkeypatch, calls=calls) as c:
+        first = c.post("/api/generate", json={"url": "acme.test", "monitor": True}).json()
+        again = c.post("/api/generate", json={"url": "https://acme.test/"}).json()
+    assert len(calls) == 1  # the second request didn't crawl
+    assert again["llms_txt"] == first["llms_txt"] and again["site_id"] == first["site_id"]
+    assert again["cached_at"] and again["stats"] is None and again["quality"] is None
+
+
+def test_cache_off_always_crawls(monkeypatch):
+    monkeypatch.setattr(config, "CACHE_HOURS", 0)
+    calls = []
+    with client(monkeypatch, calls=calls) as c:
+        c.post("/api/generate", json={"url": "acme.test", "monitor": True})
+        again = c.post("/api/generate", json={"url": "acme.test"}).json()
+    assert len(calls) == 2 and again["cached_at"] is None
+
+
+def test_unmonitored_site_is_never_cached(monkeypatch):
+    calls = []
+    with client(monkeypatch, calls=calls) as c:
+        c.post("/api/generate", json={"url": "acme.test"})
+        c.post("/api/generate", json={"url": "acme.test"})
+    assert len(calls) == 2  # nothing was stored, so there's nothing to reuse

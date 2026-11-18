@@ -2,6 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -10,9 +11,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from . import config
+from . import config, llmstxt, urls
 from .crawler import CrawlError
-from .db import SessionLocal, Site, init_db
+from .db import SessionLocal, Site, init_db, utcnow
 from .generate import generate
 from .monitor import start_scheduler, store_site
 
@@ -38,6 +39,7 @@ app = FastAPI(title="llms.txt Generator", lifespan=lifespan)
 class GenerateRequest(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
     monitor: bool = False
+    refresh: bool = False  # True = crawl again even if a recent saved copy exists
 
 
 class CrawlStats(BaseModel):
@@ -62,11 +64,12 @@ class Quality(BaseModel):
 class GenerateResponse(BaseModel):
     llms_txt: str
     url: str
-    stats: CrawlStats
+    stats: CrawlStats | None = None  # None for a saved copy
     problems: list[str]
-    quality: Quality
+    quality: Quality | None = None  # None for a saved copy
     site_id: str | None = None
     stable_url: str | None = None
+    cached_at: datetime | None = None  # set when this is a saved copy: when it was crawled
 
 
 def stable_url(request: Request, site_id: str) -> str:
@@ -83,13 +86,26 @@ def health():
 
 @app.post("/api/generate", response_model=GenerateResponse)
 async def generate_llms_txt(body: GenerateRequest, request: Request):
-    # 1. Crawl the site and build the llms.txt.
+    # 1. If this site is stored and was crawled recently, return the saved file (unless asked to regenerate).
+    if not body.refresh:
+        with SessionLocal() as session:
+            url = urls.normalize(urls.ensure_scheme(body.url))
+            site = session.scalar(select(Site).where(Site.url == url))
+            if site and utcnow() - site.last_crawled_at < timedelta(hours=config.CACHE_HOURS):
+                text = site.current_version.llms_txt
+                return GenerateResponse(
+                    llms_txt=text, url=site.url, problems=llmstxt.validate(text),
+                    site_id=site.id, stable_url=stable_url(request, site.id),
+                    cached_at=site.last_crawled_at.replace(tzinfo=timezone.utc),
+                )
+
+    # 2. Crawl the site and build the llms.txt.
     try:
         gen = await generate(body.url)
     except CrawlError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    # 2. Store it if the user asked to monitor it, or update it if it's already monitored.
+    # 3. Store it if the user asked to monitor it, or update it if it's already monitored.
     site_id = None
     with SessionLocal() as session:
         already_stored = session.scalar(select(Site.id).where(Site.url == gen.crawl.start_url))
