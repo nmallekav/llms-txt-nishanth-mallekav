@@ -2,7 +2,6 @@
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -11,23 +10,21 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from . import urls
-from .config import get_settings
+from . import config
 from .crawler import CrawlError
-from .db import SessionLocal, Site, init_db, utcnow
+from .db import SessionLocal, Site, init_db
 from .generate import generate
-from .monitor import cached_site, start_scheduler, store_site
+from .monitor import start_scheduler, store_site
 
 log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    settings = get_settings()
-    logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(level=config.LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    init_db(settings.database_url)
-    scheduler = start_scheduler(settings) if settings.monitor_enabled else None
+    init_db(config.DATABASE_URL)
+    scheduler = start_scheduler() if config.MONITOR_ENABLED else None
     yield
     if scheduler:
         scheduler.shutdown(wait=False)
@@ -41,7 +38,6 @@ app = FastAPI(title="llms.txt Generator", lifespan=lifespan)
 class GenerateRequest(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
     monitor: bool = False
-    refresh: bool = False  # skip the cache and crawl now ("Regenerate now")
 
 
 class CrawlStats(BaseModel):
@@ -71,13 +67,10 @@ class GenerateResponse(BaseModel):
     quality: Quality
     site_id: str | None = None
     stable_url: str | None = None
-    cached: bool = False  # true if served from the database instead of a fresh crawl
-    crawled_at: datetime  # when this llms.txt was crawled
-    checked_at: datetime | None = None  # when the monitor last confirmed it was current
 
 
 def stable_url(request: Request, site_id: str) -> str:
-    base = get_settings().public_base_url.rstrip("/") or str(request.base_url).rstrip("/")
+    base = config.PUBLIC_BASE_URL.rstrip("/") or str(request.base_url).rstrip("/")
     return f"{base}/s/{site_id}/llms.txt"
 
 
@@ -88,53 +81,22 @@ def health():
     return {"ok": True}
 
 
-def utc(dt: datetime | None) -> datetime | None:
-    """DB times are naive UTC; mark them as UTC so the browser shows the right local time."""
-    return dt.replace(tzinfo=timezone.utc) if dt else None
-
-
-def cached_response(site: Site, request: Request) -> GenerateResponse:
-    return GenerateResponse(
-        llms_txt=site.current_version.llms_txt,
-        url=site.url,
-        stats=CrawlStats(**site.crawl_stats),
-        problems=[],
-        quality=Quality(**site.quality),
-        site_id=site.id,
-        stable_url=stable_url(request, site.id),
-        cached=True,
-        crawled_at=utc(site.last_crawled_at),
-        checked_at=utc(site.last_checked_at),
-    )
-
-
 @app.post("/api/generate", response_model=GenerateResponse)
 async def generate_llms_txt(body: GenerateRequest, request: Request):
-    settings = get_settings()
-
-    # 1. A stored site that was confirmed current recently: return it instantly.
-    key = urls.normalize(urls.ensure_scheme(body.url))
-    if key and not body.refresh:
-        with SessionLocal() as session:
-            site = cached_site(session, key, settings)
-            if site:
-                return cached_response(site, request)
-
-    # 2. Otherwise crawl now.
+    # 1. Crawl the site and build the llms.txt.
     try:
-        gen = await generate(body.url, settings)
+        gen = await generate(body.url)
     except CrawlError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    # 3. Store it if the user asked to monitor it, or refresh it if it's already monitored.
+    # 2. Store it if the user asked to monitor it, or update it if it's already monitored.
     site_id = None
     with SessionLocal() as session:
         already_stored = session.scalar(select(Site.id).where(Site.url == gen.crawl.start_url))
         if body.monitor or already_stored:
-            site_id = store_site(session, gen.crawl, settings).id
+            site_id = store_site(session, gen.crawl).id
 
     crawl = gen.crawl
-    now = utc(utcnow())
     return GenerateResponse(
         llms_txt=gen.llms_txt,
         url=crawl.start_url,
@@ -146,8 +108,6 @@ async def generate_llms_txt(body: GenerateRequest, request: Request):
                         checks=[QualityCheck(**vars(c)) for c in gen.quality.checks]),
         site_id=site_id,
         stable_url=stable_url(request, site_id) if site_id else None,
-        crawled_at=now,
-        checked_at=now if site_id else None,
     )
 
 
@@ -162,7 +122,7 @@ def stable_llms_txt(site_id: str):
 
 # ---------- frontend ----------
 
-dist = Path(get_settings().frontend_dist)
+dist = Path(config.FRONTEND_DIST)
 if (dist / "index.html").exists():
     app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
 

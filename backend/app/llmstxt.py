@@ -2,7 +2,7 @@
 
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from urllib.parse import urlsplit
 
 from .extract import clean_text
@@ -31,7 +31,6 @@ class Entry:
     section: str
     score: float
     md_url: str | None = None
-    alt_descriptions: list[str] = field(default_factory=list)
 
 
 def build(site_name: str, summary: str | None, pages: list, homepage_url: str | None = None,
@@ -120,18 +119,10 @@ def _sorted(entries: list) -> list:
 
 
 def _drop_boilerplate(pages: list) -> list:
-    """Replace descriptions repeated across many pages (a site-wide default) with each page's fallback."""
+    """Remove descriptions repeated across many pages: a site-wide default, not a page description."""
     counts = Counter(p.description for p in pages if p.description)
     boilerplate = {d for d, n in counts.items() if n >= BOILERPLATE_MIN_PAGES}
-    if not boilerplate:
-        return pages
-    result = []
-    for p in pages:
-        if p.description in boilerplate:
-            fallback = next((d for d in getattr(p, "alt_descriptions", []) if d not in boilerplate), None)
-            p = replace(p, description=fallback)
-        result.append(p)
-    return result
+    return [replace(p, description=None) if p.description in boilerplate else p for p in pages]
 
 
 def _dedupe(pages: list, max_chars: int) -> list:

@@ -14,7 +14,7 @@ def result(pages, nav=(), stop="queue_empty", sitemap_count=0):
     return CrawlResult(
         start_url="https://acme.test/", homepage_url="https://acme.test/", scope_path="/",
         site_name="Acme", summary="Acme makes APIs.", pages=[page("/")] + pages, sitemaps=[],
-        homepage_etag=None, homepage_last_modified=None, failed={}, stop_reason=stop,
+        homepage_etag=None, homepage_last_modified=None, stop_reason=stop,
         duration_seconds=1.0, nav_urls=list(nav), sitemap_url_count=sitemap_count,
     )
 

@@ -86,16 +86,16 @@ s = pres.addSlide({ masterName: "Title Only", sectionTitle: "Intro" });
 s.addText("What it does", { placeholder: "title" });
 text(s, "Enter a URL, get a spec-compliant llms.txt: a curated map of a site's most important pages for LLMs.", 0.6, 1.35, 12.1, 0.5, { fontSize: 18, color: C.text2 });
 const steps = [
-  ["Crawl", ["Best-first crawler with a priority queue finds the ~50 most important pages",
+  ["Crawl", ["Best-first crawler always fetches the highest-scoring links next, keeping the ~50 most important pages",
     "Seeds from sitemaps and homepage nav; respects robots.txt and stays on the site"]],
-  ["Extract", ["Reads each page's title, meta description and canonical URL",
+  ["Extract", ["Reads each page's title, meta description and markdown link",
     "Finds the LLM-friendly markdown (.md) version when the site publishes one"]],
   ["Generate", ["Builds the H1 name, > summary, H2 link sections and ## Optional last",
     "Validated against the spec; links point to .md versions where they exist"]],
   ["Score", ["Quality report out of 100 with pass / warning checks",
     "Flags missing descriptions, missing menu pages, no .md versions, oversized files, partial crawls"]],
   ["Monitor", ["Daily ETag check; re-crawls only when something actually changed",
-    "Stable link /s/{id}/llms.txt always serves the latest version; results cached for 24h"]],
+    "Stable link /s/{id}/llms.txt always serves the latest version"]],
 ];
 steps.forEach(([h, items], i) => {
   const y = 2.05 + i * 0.97;
@@ -114,7 +114,7 @@ text(s, bullets([
   [{ text: "Point to markdown: ", bold: true }, { text: "link to a page's .md version when one exists, as the spec recommends" }],
   [{ text: "Curated, not a sitemap: ", bold: true }, { text: "pick the ~50 best pages, so a best-first crawl instead of plain BFS" }],
   [{ text: "Stay current: ", bold: true }, { text: "sites change, so a daily ETag check and publish only on real changes" }],
-  [{ text: "Crawl politely and safely: ", bold: true }, { text: "robots.txt, Crawl-delay, request limits, no private IPs" }],
+  [{ text: "Crawl politely and safely: ", bold: true }, { text: "robots.txt, request limits, no private IPs" }],
   [{ text: "Simple to run: ", bold: true }, { text: "no API keys, SQLite, one Docker image" }],
   [{ text: "Check against reality: ", bold: true }, { text: "compare output with 5 published llms.txt files from llmstxt.site" }],
 ], 18).map((r) => ({ ...r, options: { ...r.options, paraSpaceAfter: 14 } })), 0.6, 1.55, 12.1, 5.2, { color: C.text1 });
@@ -192,23 +192,22 @@ s.addText("The whole app in pseudocode", { placeholder: "title" });
     text(s, pc(items), x + 0.25, y + 0.78, w - 0.45, h - 0.9, { color: C.text2 });
   };
   card("User clicks Generate", 1, 0.6, 1.45, 6.1, 5.3, [
-    ["Stored and checked in the last 24h? Return the saved file instantly"],
     ["Clean the URL; refuse invalid or private / internal addresses"],
-    ["Read robots.txt: keep its rules, Crawl-delay and Sitemap lines"],
+    ["Read robots.txt: keep its rules and Sitemap lines"],
     ["Fetch the homepage (error if it fails); read site name and summary"],
-    ["Seed the priority queue with homepage links and sitemap URLs"],
-    ["Loop until 50 pages, 45s, too many errors or an empty queue:"],
-    ["take the top 5 URLs and fetch them in parallel", 1],
-    ["skip non-HTML, duplicate and noindex pages", 1],
-    ["save title, description and ETag; score and queue its links", 1],
-    ["Look for .md versions of the saved pages"],
+    ["Collect scored candidates: homepage links and sitemap URLs"],
+    ["Loop until 50 pages, 45s or no candidates are left:"],
+    ["take the 5 highest-scoring and fetch them in parallel", 1],
+    ["skip failed, non-HTML, duplicate and noindex pages", 1],
+    ["save title, description and ETag; score its links as new candidates", 1],
+    ["Link to .md versions where the page declares one"],
     ["Build llms.txt, check it against the spec, score its quality"],
     ["Show the file and quality report (Copy / Download)"],
   ]);
   card("Every 15 minutes (scheduler)", 2, 6.95, 1.45, 5.75, 2.95, [
     ["Find sites whose next check is due"],
     ["Last full crawl 7+ days ago → re-crawl"],
-    ["Otherwise send the saved ETags:"],
+    ["Otherwise send the saved ETags, 5 at a time:"],
     ["all unchanged → next check in 24h · failed → retry in 6h", 1],
     ["something changed → re-crawl", 1],
     ["Same file → keep it; different → save a new version"],
@@ -241,9 +240,9 @@ s.addText("Inside the code: how the files fit together", { placeholder: "title" 
   f("llmstxt.py", 7.4, 1.5, ...DARK);
   f("quality.py", 7.4, 2.3, C.accent2, C.background1);
   f("crawler.py", 7.4, 3.85, C.accent1, C.background1);
-  const helpers = [["1. urls.py", false], ["2. fetcher.py", true], ["3. extract.py", false], ["4. scoring.py", true], ["5. sitemaps.py", true], ["6. markdown.py", true]];
+  const helpers = [["1. urls.py", false], ["2. fetcher.py", true], ["3. extract.py", false], ["4. scoring.py", true], ["5. sitemaps.py", true]];
   helpers.forEach(([h, split], i) => {
-    const y = 1.5 + i * 0.83;
+    const y = 2.19 + i * 0.83;
     f(h, 10.95, y, split ? C.accent4 : C.background2, C.text1, split ? undefined : C.accent3);
     s.addShape(pres.shapes.LINE, { x: 9.15, y: Math.min(4.16, y + bh / 2), w: 1.8, h: Math.abs(y + bh / 2 - 4.16),
       flipV: y + bh / 2 < 4.16, line: { color: C.accent3, width: 1.25, endArrowType: "triangle" }, objectName: name("helper-arrow") });
@@ -275,7 +274,7 @@ s.addText("Inside the code: how the files fit together", { placeholder: "title" 
   });
   text(s, "Pure helpers (urls, extract, scoring, sitemaps, quality) do no network I/O, so they are easy to unit test.", 0.6, 4.6, 2.85, 1.3, { fontSize: 13, color: C.text2 });
 }
-s.addNotes("This is the module diagram from docs/code-walkthrough.md. The helpers on the right are numbered in the order the crawler first calls them: urls.py normalizes the start URL and checks it is public (SSRF), fetcher.py downloads robots.txt and the homepage, extract.py parses the homepage, scoring.py ranks the links it found, sitemaps.py parses the sitemaps, and markdown.py probes for .md versions at the end. Left half (generate.py and below) turns a URL into a file and never touches the database. monitor.py stores sites, checks them on a schedule, and re-runs the same crawl and render when something changed.");
+s.addNotes("This is the module diagram from docs/code-walkthrough.md. The helpers on the right are numbered in the order the crawler first calls them: urls.py normalizes the start URL and checks it is public (SSRF), fetcher.py downloads robots.txt and the homepage, extract.py parses the homepage, scoring.py ranks the links it found, and sitemaps.py parses the sitemaps. Left half (generate.py and below) turns a URL into a file and never touches the database. monitor.py stores sites, checks them on a schedule, and re-runs the same crawl and render when something changed.");
 
 // ---------- 5. Scheduler ----------
 s = pres.addSlide({ masterName: "Title Only", sectionTitle: "Architecture" });
@@ -283,7 +282,7 @@ s.addText("How the scheduler keeps files fresh", { placeholder: "title" });
 text(s, "A cheap ETag check decides when to pay for a crawl; the file hash decides whether to publish.", 0.6, 1.35, 12.1, 0.5, { fontSize: 18, color: C.text2 });
 const flow = [
   ["Tick every 15 min", "APScheduler finds up to 5 sites with next_check_at ≤ now"],
-  ["ETag check", "Conditional GET (If-None-Match / If-Modified-Since) for homepage, sitemaps and listed pages; stops at the first change"],
+  ["ETag check", "Conditional GET (If-None-Match / If-Modified-Since) for homepage, sitemaps and listed pages, 5 at a time; stops at the first change"],
   ["Re-crawl if changed", "Any 200/404/410, or the last full crawl is over 7 days old"],
   ["Publish only if different", "New version saved only when sha256(llms.txt) changes, with a summary like “+3 pages, 2 descriptions changed”"],
 ];
@@ -306,17 +305,17 @@ const rows = [
 s.addTable(rows, { x: 7.0, y: 2.15, w: 5.7, colW: [2.0, 3.7], rowH: 0.5, border: { type: "solid", pt: 0.75, color: HEX.accent5 }, margin: 0.08, objectName: "etag-table" });
 box(s, 7.0, 5.65, 5.7, 1.05, { fill: C.accent6, name: "failsafe" });
 text(s, "No validators? Treated as changed (correct, just not cheap). 3 failures in a row → site marked failing.", 7.25, 5.7, 5.25, 0.95, { fontSize: 14, valign: "middle" });
-s.addNotes("Default interval is 24 hours per site, so checks spread across the day. The 7-day full-crawl backstop catches pages the ETag check can't see. Failed crawls never overwrite the current version, and pages that fail transiently are carried over.");
+s.addNotes("Default interval is 24 hours per site, so checks spread across the day. The 7-day full-crawl backstop catches pages the ETag check can't see. Failed crawls never overwrite the current version.");
 
 // ---------- 6. Crawler loop ----------
 pres.addSection({ title: "Crawler" });
 s = pres.addSlide({ masterName: "Title Only", sectionTitle: "Crawler" });
 s.addText("Crawler: best-first, 5 pages at a time", { placeholder: "title" });
-text(s, "A priority queue means that when the 50-page budget runs out, we have the best pages, not just the first ones.", 0.6, 1.35, 12.1, 0.5, { fontSize: 18, color: C.text2 });
+text(s, "Always fetching the highest-scoring links means a full 50-page budget holds the best pages, not just the first ones.", 0.6, 1.35, 12.1, 0.5, { fontSize: 18, color: C.text2 });
 // seed
-node(s, "Seed queue", "robots.txt · sitemaps · homepage nav", 0.6, 2.4, 2.6, 1.1, C.text1, C.background1);
+node(s, "Collect candidates", "robots.txt · sitemaps · homepage nav", 0.6, 2.4, 2.6, 1.1, C.text1, C.background1);
 arrow(s, 3.2, 2.95, 0.5, 0);
-node(s, "Pop top 5", "highest score first (heapq)", 3.7, 2.4, 2.3, 1.1, C.accent1, C.background1);
+node(s, "Take top 5", "highest score first", 3.7, 2.4, 2.3, 1.1, C.accent1, C.background1);
 arrow(s, 6.0, 2.95, 0.5, 0);
 // parallel lanes
 box(s, 6.5, 2.0, 2.6, 1.9, { fill: C.background2, line: C.accent3, dash: "dash", name: "gather" });
@@ -326,7 +325,7 @@ for (let i = 0; i < 5; i++) {
   text(s, `GET page ${i + 1}`, 6.85, 2.4 + i * 0.29, 1.9, 0.22, { fontSize: 10, color: C.background1, valign: "middle", bold: true });
 }
 arrow(s, 9.1, 2.95, 0.5, 0);
-node(s, "Extract + score links", "push new URLs, boost known ones", 9.6, 2.4, 3.1, 1.1, C.text1, C.background1);
+node(s, "Extract + score links", "add new candidates, re-score known ones", 9.6, 2.4, 3.1, 1.1, C.text1, C.background1);
 // loop back
 s.addShape(pres.shapes.LINE, { x: 4.85, y: 4.15, w: 6.3, h: 0, line: { color: C.accent3, width: 1.5, dashType: "dash" }, objectName: "loop-line" });
 s.addShape(pres.shapes.LINE, { x: 11.15, y: 3.5, w: 0, h: 0.65, line: { color: C.accent3, width: 1.5, dashType: "dash" }, objectName: "loop-up" });
@@ -340,12 +339,12 @@ stats.forEach(([n, l], i) => {
   text(s, n, x + 0.3, 4.95, 2.3, 0.95, { fontSize: 48, bold: true, color: C.accent1, valign: "middle" });
   text(s, l, x + 0.3, 5.95, 2.3, 0.6, { fontSize: 14, color: C.text2 });
 });
-s.addNotes("Each round pops the 5 highest-scoring URLs and fetches them concurrently with asyncio.gather on one shared httpx client. If robots.txt sets a Crawl-delay, the batch size drops to 1 and we sleep between requests. Markdown-version probes run afterwards, also 5 at a time, only for pages that made the output.");
+s.addNotes("Each round takes the 5 highest-scoring candidates and fetches them concurrently with asyncio.gather on one shared httpx client.");
 
 // ---------- 7. Scoring ----------
 s = pres.addSlide({ masterName: "Title Only", sectionTitle: "Crawler" });
 s.addText("How we score URLs", { placeholder: "title" });
-text(s, "Every URL is scored when it's queued. Found again from another page? Its signals add up and it's re-pushed higher.", 0.6, 1.35, 12.1, 0.5, { fontSize: 18, color: C.text2 });
+text(s, "Every URL is scored when it's found, and re-scored each time another page links to it.", 0.6, 1.35, 12.1, 0.5, { fontSize: 18, color: C.text2 });
 const sig = [
   ["Linked from homepage nav / header", 30],
   ["High-value keyword (docs, api, pricing, about…)", 20],
@@ -354,7 +353,7 @@ const sig = [
   ["Linked from a footer", 5],
   ["Each extra page linking to it", 3],
   ["Each path segment deep", -8],
-  ["Each page already taken from its section", -5],
+  ["Each page already saved from its section", -5],
 ];
 const zeroX = 5.9, unit = 0.075;
 sig.forEach(([l, v], i) => {
@@ -375,19 +374,19 @@ text(s, "/careers/senior-engineer", 9.15, 4.35, 3.4, 0.35, { fontSize: 15, bold:
 text(s, "footer +5 · sitemap +15 · depth −16", 9.15, 4.75, 3.4, 0.6, { fontSize: 13, color: C.text2 });
 text(s, "= 4", 9.15, 5.4, 3.4, 0.6, { fontSize: 28, bold: true, color: C.accent1 });
 box(s, 0.6, 6.3, 12.1, 0.5, { fill: C.accent6, name: "cap" });
-text(s, "Hard cap: 15 pages per section, so a huge /blog can't eat the whole budget. All weights are env-configurable.", 0.85, 6.3, 11.7, 0.5, { fontSize: 14, valign: "middle" });
-s.addNotes("Heap stores (-score, counter, url) so ties break in discovery order. Scores aren't recomputed on pop, which keeps the queue simple; the section cap stops any one section dominating. Known trade-off: best-first is greedy, so a deep page with no sitemap entry can be missed.");
+text(s, "The section penalty spreads the 50 pages out, so a huge /blog can't take them all. All weights are env-configurable.", 0.85, 6.3, 11.7, 0.5, { fontSize: 14, valign: "middle" });
+s.addNotes("Candidates are sorted by score each round. The section penalty (−5 per page already saved from that section) stops any one section dominating. Known trade-off: best-first is greedy, so a deep page with no sitemap entry can be missed.");
 
 // ---------- 8. Edge cases ----------
 s = pres.addSlide({ masterName: "Title Only", sectionTitle: "Crawler" });
 s.addText("Edge and error cases we handle", { placeholder: "title" });
 const cards = [
   ["Scope and safety", ["Same host only; www and bare domain are one site", "Private and loopback IPs refused (SSRF)", "Subpath input stays under that path", "Cross-domain redirects dropped"]],
-  ["Duplicate URLs", ["Strip #fragments and utm_, gclid, fbclid", "Sort query params, fold /index.html", "Follow same-host rel=canonical", "Each URL fetched once"]],
+  ["Duplicate URLs", ["Strip #fragments and utm_, gclid, fbclid", "Sort query params, fold /index.html", "Each URL fetched once"]],
   ["Pages we skip", ["Login, cart, checkout, search, admin", "?page=2, /tag/, /category/, date archives", "Other-language copies (/fr/, /de/)", "PDFs, images, non-HTML, noindex"]],
-  ["Politeness and limits", ["robots.txt rules and Crawl-delay", "10s per request, 5 redirects max", "2 MB body cap, 5 sitemap files max", "Identifying User-Agent"]],
-  ["Failures", ["Homepage fails → clear error, no partial file", "5 consecutive timeouts / 5xx / 429 → stop, return partial", "403 on single pages doesn't count", "45s budget → return what we have"]],
-  ["Output quality", ["Boilerplate descriptions on 3+ pages replaced", "One-page sections grouped into “Other”", "Sorted by score, then URL: deterministic", "Failed re-crawl never overwrites a version"]],
+  ["Politeness and limits", ["robots.txt rules", "10s per request, 5 redirects max", "2 MB body cap, 5 sitemap files max", "Identifying User-Agent"]],
+  ["Failures", ["Homepage fails → clear error, no partial file", "A page that fails later is skipped", "45s budget → return what we have"]],
+  ["Output quality", ["Boilerplate descriptions on 3+ pages removed", "One-page sections grouped into “Other”", "Sorted by score, then URL: deterministic", "Failed re-crawl never overwrites a version"]],
 ];
 cards.forEach(([h, items], i) => {
   const col = i % 3, row = Math.floor(i / 3);
@@ -397,7 +396,7 @@ cards.forEach(([h, items], i) => {
   text(s, h, x + 0.8, y + 0.22, 2.9, 0.42, { fontSize: 17, bold: true, valign: "middle" });
   text(s, bullets(items, 14), x + 0.25, y + 0.8, 3.5, 1.75, { color: C.text2 });
 });
-s.addNotes("Highlight the failure handling card: the crawler never raises on a bad page; the fetcher returns error codes, and transient errors are counted. Tests use httpx.MockTransport fake sites so these cases run without the network.");
+s.addNotes("Highlight the failure handling card: the crawler never raises on a bad page; the fetcher returns error codes and that page is skipped. Tests use httpx.MockTransport fake sites so these cases run without the network.");
 
 // ---------- 9. Next steps ----------
 pres.addSection({ title: "Next steps" });

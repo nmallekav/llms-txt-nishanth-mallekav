@@ -1,13 +1,12 @@
 from app.llmstxt import Entry, build, validate
 
 
-def entry(path, title, desc=None, score=10.0, section=None, md=None, alt=None):
+def entry(path, title, desc=None, score=10.0, section=None, md=None):
     url = f"https://acme.com{path}"
     segments = [s for s in path.split("/") if s]
     if section is None:
         section = segments[0] if len(segments) >= 2 else ""
-    return Entry(url=url, title=title, description=desc, section=section, score=score, md_url=md,
-                 alt_descriptions=alt or [])
+    return Entry(url=url, title=title, description=desc, section=section, score=score, md_url=md)
 
 
 def test_build_matches_spec_layout():
@@ -54,12 +53,12 @@ def test_single_page_sections_go_to_other():
     assert validate(text) == []
 
 
-def test_boilerplate_descriptions_are_replaced():
+def test_boilerplate_descriptions_are_dropped():
     shared = "The best site ever."
-    pages = [entry(f"/docs/p{i}", f"P{i}", shared, alt=[f"Real {i}."]) for i in range(3)]
+    pages = [entry(f"/docs/p{i}", f"P{i}", shared) for i in range(3)]
     text = build("Acme", None, pages)
     assert shared not in text
-    assert "Real 0." in text
+    assert "- [P0](https://acme.com/docs/p0)\n" in text
 
 
 def test_escaping_and_truncation():

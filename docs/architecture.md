@@ -29,16 +29,14 @@ sequenceDiagram
 | Module | Responsibility | Details |
 |---|---|---|
 | `urls.py` | URL normalization, scope and skip rules (pure functions) | [crawler.md](crawler.md#3-url-normalization) |
-| `crawler.py` | The crawl itself: robots.txt, homepage, priority queue, crawl loop | [crawler.md](crawler.md) |
+| `crawler.py` | The crawl itself: robots.txt, homepage, scored candidates, crawl loop | [crawler.md](crawler.md) |
 | `scoring.py` | How the crawler ranks URLs (which to fetch next) | [crawler.md](crawler.md) |
 | `fetcher.py` | One HTTP GET with a size cap and error codes instead of exceptions | [crawler.md](crawler.md) |
 | `sitemaps.py` | Parse sitemap.xml and sitemap index files (pure functions) | [crawler.md](crawler.md) |
-| `markdown.py` | Find `.md` versions of pages | [llms-txt-format.md](llms-txt-format.md) |
-| `extract.py` | Pull title, description, canonical, markdown alternate from HTML | [llms-txt-format.md](llms-txt-format.md#where-each-value-comes-from) |
+| `extract.py` | Pull title, description, markdown alternate from HTML | [llms-txt-format.md](llms-txt-format.md#where-each-value-comes-from) |
 | `llmstxt.py` | Build + validate the llms.txt file | [llms-txt-format.md](llms-txt-format.md) |
 | `generate.py` | Glue: crawl, then build + validate + quality report | below |
 | `quality.py` | Score the generated file and list warnings | [code-walkthrough.md](code-walkthrough.md) |
-| `cli.py` | `python -m app.cli <url>` for local testing | README |
 | `monitor.py` | Scheduled ETag check, automatic re-crawl on change | [monitoring.md](monitoring.md) |
 | `db.py` | SQLAlchemy models and SQLite session | [database.md](database.md) |
 | `config.py` | All tunable settings (env-overridable) | [crawler.md](crawler.md#configuration) |
@@ -82,11 +80,9 @@ llms-txt-nishanth-mallekav/
 │   │   ├── scoring.py
 │   │   ├── fetcher.py
 │   │   ├── sitemaps.py
-│   │   ├── markdown.py
 │   │   ├── extract.py
 │   │   ├── llmstxt.py
 │   │   ├── generate.py
-│   │   ├── cli.py
 │   │   ├── monitor.py
 │   │   └── db.py
 │   ├── scripts/compare.py # compare our output with a site's published llms.txt

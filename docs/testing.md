@@ -34,7 +34,7 @@ Chosen from llmstxt.site to cover different site types:
 | Large open-source project | `camel.apache.org` | Many sections, big sitemap |
 | Company / marketing site | `www.limecraft.com` | Nav-driven site, blog and case studies |
 | Small SaaS / API product | `apistax.io` | Few pages, docs + blog |
-| Large developer docs | `docs.stripe.com` | Deep docs tree, section caps, markdown alternates |
+| Large developer docs | `docs.stripe.com` | Deep docs tree, section penalty, markdown alternates |
 
 `cybersectools.com` was tried first but returned `429 Too Many Requests` to our crawler,
 so it was replaced by `docs.stripe.com`.

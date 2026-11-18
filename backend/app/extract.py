@@ -25,7 +25,6 @@ class PageMeta:
     og_description: str | None = None
     first_paragraph: str | None = None
     site_name: str | None = None
-    canonical: str | None = None
     md_alternate: str | None = None
     noindex: bool = False
     links: list[Link] = field(default_factory=list)
@@ -35,17 +34,8 @@ class PageMeta:
         return self.og_title or self.title or self.h1
 
     @property
-    def descriptions(self) -> list[str]:
-        """Description candidates, best first, without duplicates."""
-        result: list[str] = []
-        for d in (self.description, self.og_description, self.first_paragraph):
-            if d and d not in result:
-                result.append(d)
-        return result
-
-    @property
     def best_description(self) -> str | None:
-        return self.descriptions[0] if self.descriptions else None
+        return self.description or self.og_description or self.first_paragraph
 
 
 def clean_text(text: str | None) -> str | None:
@@ -71,8 +61,6 @@ def parse_html(content: bytes | str, encoding: str | None = None) -> PageMeta:
 
     for link in soup.find_all("link", href=True):
         rels = [r.lower() for r in (link.get("rel") or [])]
-        if "canonical" in rels and not meta.canonical:
-            meta.canonical = link["href"].strip()
         if "alternate" in rels and (link.get("type") or "").lower() == "text/markdown" and not meta.md_alternate:
             meta.md_alternate = link["href"].strip()
 

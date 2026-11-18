@@ -2,9 +2,8 @@
 
 from dataclasses import dataclass
 
-from . import llmstxt, quality
-from .config import Settings, get_settings
-from .crawler import CrawlResult, Page, crawl
+from . import config, llmstxt, quality
+from .crawler import CrawlResult, crawl
 
 
 @dataclass
@@ -15,22 +14,20 @@ class Generated:
     quality: quality.QualityReport
 
 
-def render(result: CrawlResult, pages: list[Page] | None = None, settings: Settings | None = None) -> str:
-    settings = settings or get_settings()
+def render(result: CrawlResult) -> str:
     return llmstxt.build(
         site_name=result.site_name,
         summary=result.summary,
-        pages=result.pages if pages is None else pages,
+        pages=result.pages,
         homepage_url=result.homepage_url,
         scope_path=result.scope_path,
-        description_max_chars=settings.description_max_chars,
+        description_max_chars=config.DESCRIPTION_MAX_CHARS,
     )
 
 
-async def generate(url: str, settings: Settings | None = None) -> Generated:
-    settings = settings or get_settings()
-    result = await crawl(url, settings)
-    text = render(result, settings=settings)
+async def generate(url: str) -> Generated:
+    result = await crawl(url)
+    text = render(result)
     problems = llmstxt.validate(text)
     return Generated(llms_txt=text, crawl=result, problems=problems,
                      quality=quality.assess(result, text, problems))

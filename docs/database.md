@@ -45,10 +45,6 @@ erDiagram
 
 ## Schema (SQLite DDL)
 
-Older databases are upgraded on startup (`_upgrade` in `db.py`): the `sitemaps` column is
-added to `sites`, the old `sitemaps` and `check_runs` tables are dropped, and unused `pages`
-columns (`selected`, `fingerprint`, `http_status`, `last_fetched_at`) are removed.
-
 Timestamps are UTC, stored by SQLAlchemy as ISO-8601 strings. Booleans are `INTEGER` 0/1.
 The models in `backend/app/db.py` create these tables on startup (`init_db`). The `CHECK`
 constraints below document the allowed values; the code enforces them.
@@ -68,8 +64,6 @@ CREATE TABLE sites (
     scope_path          TEXT NOT NULL DEFAULT '/', -- crawl scope, e.g. /docs
     summary             TEXT,                      -- homepage summary from the last crawl
     sitemaps            JSON NOT NULL DEFAULT '[]', -- [{url, etag, last_modified}] for the ETag check
-    crawl_stats         JSON,                      -- pages, sitemaps, duration, stop reason (for cached responses)
-    quality             JSON,                      -- quality report from the last crawl (for cached responses)
     created_at          TEXT NOT NULL,
     last_checked_at     TEXT,                      -- last ETag check (cheap)
     last_crawled_at     TEXT,                      -- last full crawl
@@ -96,10 +90,9 @@ CREATE INDEX idx_versions_site ON site_versions (site_id, created_at DESC);
 CREATE TABLE pages (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     site_id         TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-    url             TEXT NOT NULL,                 -- normalized / canonical URL
+    url             TEXT NOT NULL,                 -- normalized URL
     title           TEXT,
     description     TEXT,
-    alt_descriptions JSON,                         -- fallbacks if description is site-wide boilerplate
     md_url          TEXT,                          -- markdown version, if found
     section         TEXT NOT NULL,                 -- llms.txt H2 section this page belongs to
     score           REAL NOT NULL,                 -- crawler priority score

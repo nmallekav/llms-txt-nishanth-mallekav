@@ -131,11 +131,9 @@ e.g. `+3 pages, −1 page, 2 descriptions changed`, stored in `site_versions.cha
 
 - **Deterministic output:** pages are sorted by score, then URL, so identical input
   always produces an identical file.
-- **Failed crawl:** if the homepage fails, or the crawl hits the early-exit error limit,
-  nothing is saved and the current version stays.
-- **Transient errors:** if a page from the current file fails with a timeout or `5xx`
-  during a re-crawl, its previous entry is carried over. A page is only dropped on
-  `404` / `410`, or when the crawler no longer selects it.
+- **Failed crawl:** if the homepage fails, nothing is saved and the current version stays.
+- **Pages that fail during a re-crawl** (timeout, `5xx`, `404`) are left out of the new
+  file. If that changes the output, a new version is saved.
 - **Known limitation:** descriptions with live values ("Join 10,234 developers") change
   the real output, so they create a new version each time they change.
 

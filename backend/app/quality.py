@@ -9,7 +9,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
-from .config import get_settings
+from . import config
 from .crawler import CrawlResult
 from .llmstxt import BOILERPLATE_MIN_PAGES, OPTIONAL_SECTION
 
@@ -63,7 +63,7 @@ def assess(result: CrawlResult, text: str, problems: list[str]) -> QualityReport
     shared = sum(n for n in counts.values() if n >= BOILERPLATE_MIN_PAGES)
     if shared:
         checks.append(Check("Unique descriptions", "warn",
-                            f"{shared} pages share the same description; replaced with each page's own text"))
+                            f"{shared} pages share the same description, so it was left out"))
         penalty += 5
     else:
         checks.append(Check("Unique descriptions", "ok", "No site-wide default descriptions"))
@@ -112,7 +112,7 @@ def assess(result: CrawlResult, text: str, problems: list[str]) -> QualityReport
     elif result.stop_reason == "max_pages" and result.sitemap_url_count > len(result.pages):
         count = result.sitemap_url_count
         # We stop reading sitemaps at a cap, so a count at the cap means "at least this many".
-        size = f"{count:,}+" if count >= get_settings().crawl_max_sitemap_urls else f"~{count:,}"
+        size = f"{count:,}+" if count >= config.CRAWL_MAX_SITEMAP_URLS else f"~{count:,}"
         checks.append(Check("Coverage", "warn", f"Top {len(result.pages)} pages of {size} in the sitemap"))
     else:
         checks.append(Check("Coverage", "ok", f"Crawled {len(result.pages)} pages"))

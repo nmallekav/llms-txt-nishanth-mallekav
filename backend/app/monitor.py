@@ -10,7 +10,7 @@ Every few minutes the scheduler picks the sites that are due (about once a day e
 import asyncio
 import hashlib
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
@@ -19,13 +19,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import quality
-from .config import Settings, get_settings
-from .crawler import CrawlError, CrawlResult, Page, crawl
+from . import config
+from .crawler import CrawlError, CrawlResult, crawl
 from .fetcher import make_client
 from .db import PageRow, SessionLocal, Site, SiteVersion, utcnow
 from .generate import render
-from .llmstxt import validate
 
 log = logging.getLogger(__name__)
 
@@ -40,12 +38,6 @@ def fingerprint(page) -> str:
 
 def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
-
-
-def _page_from_row(row: PageRow) -> Page:
-    return Page(url=row.url, title=row.title, description=row.description, section=row.section,
-                score=row.score, md_url=row.md_url, etag=row.etag, last_modified=row.last_modified,
-                alt_descriptions=list(row.alt_descriptions or []))
 
 
 def change_summary(old: dict[str, str], new: dict[str, str]) -> str:
@@ -66,18 +58,11 @@ def change_summary(old: dict[str, str], new: dict[str, str]) -> str:
     return ", ".join(parts) or "Site details or ordering changed"
 
 
-def save_crawl(session: Session, site: Site, result: CrawlResult, settings: Settings) -> tuple[bool, str | None]:
+def save_crawl(session: Session, site: Site, result: CrawlResult) -> tuple[bool, str | None]:
     """Save a crawl's results; add a new version if the llms.txt changed. Returns (changed, summary)."""
     old_rows = {row.url: row for row in site.pages}
-    pages = list(result.pages)
-
-    # A page that only failed transiently (timeout, 5xx) keeps its previous entry.
-    new_urls = {p.url for p in pages}
-    for url, why in result.failed.items():
-        if why == "transient" and url in old_rows and url not in new_urls:
-            pages.append(_page_from_row(old_rows[url]))
-
-    text = render(result, pages, settings)
+    pages = result.pages
+    text = render(result)
     digest = content_hash(text)
     now = utcnow()
 
@@ -90,10 +75,6 @@ def save_crawl(session: Session, site: Site, result: CrawlResult, settings: Sett
     site.scope_path = result.scope_path
     site.last_crawled_at = now
     site.sitemaps = [{"url": s.url, "etag": s.etag, "last_modified": s.last_modified} for s in result.sitemaps]
-    site.crawl_stats = {"pages": len(result.pages), "sitemaps": len(result.sitemaps),
-                        "duration_seconds": result.duration_seconds, "stop_reason": result.stop_reason,
-                        "partial": result.partial}
-    site.quality = asdict(quality.assess(result, text, validate(text)))
 
     # Replace pages (delete first so the (site_id, url) unique constraint holds).
     for row in list(site.pages):
@@ -103,7 +84,7 @@ def save_crawl(session: Session, site: Site, result: CrawlResult, settings: Sett
     for p in pages:
         session.add(PageRow(
             site_id=site.id, url=p.url, title=p.title, description=p.description,
-            alt_descriptions=p.alt_descriptions, md_url=p.md_url, section=p.section, score=p.score,
+            md_url=p.md_url, section=p.section, score=p.score,
             etag=p.etag, last_modified=p.last_modified,
         ))
 
@@ -125,32 +106,16 @@ def save_crawl(session: Session, site: Site, result: CrawlResult, settings: Sett
     return True, summary
 
 
-def store_site(session: Session, result: CrawlResult, settings: Settings | None = None) -> Site:
+def store_site(session: Session, result: CrawlResult) -> Site:
     """Start monitoring a freshly crawled site (or refresh it if it's already stored)."""
-    settings = settings or get_settings()
     site = session.scalar(select(Site).where(Site.url == result.start_url))
     if site is None:
         site = Site(url=result.start_url)
         session.add(site)
         session.flush()
-    save_crawl(session, site, result, settings)
-    _mark_success(site, settings)
+    save_crawl(session, site, result)
+    _mark_success(site)
     session.commit()
-    return site
-
-
-def cached_site(session: Session, url: str, settings: Settings | None = None) -> Site | None:
-    """A stored site whose llms.txt was confirmed current within cache_max_age_hours, or None."""
-    settings = settings or get_settings()
-    if settings.cache_max_age_hours <= 0:
-        return None
-    site = session.scalar(select(Site).where(Site.url == url))
-    if site is None or site.current_version is None or site.last_checked_at is None:
-        return None
-    if site.crawl_stats is None or site.quality is None:
-        return None  # stored before these were saved; a fresh crawl fills them in
-    if utcnow() - site.last_checked_at > timedelta(hours=settings.cache_max_age_hours):
-        return None
     return site
 
 
@@ -163,16 +128,16 @@ class _Target:
     last_modified: str | None
 
 
-async def etag_check(targets: list[_Target], settings: Settings, client: httpx.AsyncClient) -> tuple[str, str | None]:
+async def etag_check(targets: list[_Target], client: httpx.AsyncClient) -> tuple[str, str | None]:
     """Conditional GETs for each target. Returns ("unchanged" | "changed" | "failed", reason).
 
     Stops at the first changed URL. A URL with no ETag or Last-Modified counts as changed.
     """
     first_failure: str | None = None
-    size = max(1, settings.crawl_concurrency)
+    size = max(1, config.CRAWL_CONCURRENCY)
     for i in range(0, len(targets), size):
         batch = targets[i:i + size]
-        outcomes = await asyncio.gather(*(_check_one(t, settings, client) for t in batch))
+        outcomes = await asyncio.gather(*(_check_one(t, client) for t in batch))
         for outcome, reason in outcomes:
             if outcome == "changed":
                 return "changed", reason
@@ -183,7 +148,7 @@ async def etag_check(targets: list[_Target], settings: Settings, client: httpx.A
     return "unchanged", None
 
 
-async def _check_one(t: _Target, settings: Settings, client: httpx.AsyncClient) -> tuple[str, str]:
+async def _check_one(t: _Target, client: httpx.AsyncClient) -> tuple[str, str]:
     path = urlsplit(t.url).path or "/"
     if t.etag:
         headers = {"If-None-Match": t.etag}
@@ -192,7 +157,7 @@ async def _check_one(t: _Target, settings: Settings, client: httpx.AsyncClient) 
     else:
         return "changed", f"no ETag or Last-Modified: {path}"
     try:
-        async with client.stream("GET", t.url, headers=headers, timeout=settings.crawl_request_timeout_seconds) as r:
+        async with client.stream("GET", t.url, headers=headers, timeout=config.CRAWL_REQUEST_TIMEOUT_SECONDS) as r:
             status = r.status_code
             etag, last_modified = r.headers.get("etag"), r.headers.get("last-modified")
     except httpx.HTTPError as e:
@@ -220,42 +185,40 @@ def _targets(site: Site) -> list[_Target]:
 
 # ---------- processing one site ----------
 
-def _mark_success(site: Site, settings: Settings) -> None:
+def _mark_success(site: Site) -> None:
     now = utcnow()
     site.last_checked_at = now
-    site.next_check_at = now + timedelta(hours=settings.monitor_check_interval_hours)
+    site.next_check_at = now + timedelta(hours=config.MONITOR_CHECK_INTERVAL_HOURS)
     site.fail_count = 0
     site.last_error = None
     if site.status == "failing":
         site.status = "active"
 
 
-def _mark_failure(site: Site, error: str, settings: Settings) -> None:
+def _mark_failure(site: Site, error: str) -> None:
     now = utcnow()
     site.last_checked_at = now
     site.fail_count += 1
     site.last_error = error
-    if site.fail_count >= settings.monitor_max_retries:
+    if site.fail_count >= config.MONITOR_MAX_RETRIES:
         site.status = "failing"
-        site.next_check_at = now + timedelta(hours=settings.monitor_check_interval_hours)
+        site.next_check_at = now + timedelta(hours=config.MONITOR_CHECK_INTERVAL_HOURS)
     else:
-        site.next_check_at = now + timedelta(hours=settings.monitor_retry_hours)
+        site.next_check_at = now + timedelta(hours=config.MONITOR_RETRY_HOURS)
 
 
-async def process_site(site_id: str, force: bool = False,
-                       settings: Settings | None = None, client: httpx.AsyncClient | None = None) -> str:
+async def process_site(site_id: str, force: bool = False, client: httpx.AsyncClient | None = None) -> str:
     """Check one site and re-crawl it if needed. Returns "unchanged", "changed", "failed" or "missing".
 
     force: skip the ETag check and always re-crawl.
     """
-    settings = settings or get_settings()
     if client:
-        return await _process(site_id, force, settings, client)
-    async with make_client(settings) as client:
-        return await _process(site_id, force, settings, client)
+        return await _process(site_id, force, client)
+    async with make_client() as client:
+        return await _process(site_id, force, client)
 
 
-async def _process(site_id: str, force: bool, settings: Settings, client: httpx.AsyncClient) -> str:
+async def _process(site_id: str, force: bool, client: httpx.AsyncClient) -> str:
     # 1. Read what we need, then close the session while doing network work.
     with SessionLocal() as session:
         site = session.get(Site, site_id)
@@ -263,7 +226,7 @@ async def _process(site_id: str, force: bool, settings: Settings, client: httpx.
             return "missing"
         url = site.url
         targets = _targets(site)
-        ttl = settings.monitor_full_crawl_ttl_days
+        ttl = config.MONITOR_FULL_CRAWL_TTL_DAYS
         full_crawl_due = ttl > 0 and (site.last_crawled_at is None
                                       or utcnow() - site.last_crawled_at >= timedelta(days=ttl))
 
@@ -273,32 +236,30 @@ async def _process(site_id: str, force: bool, settings: Settings, client: httpx.
     elif full_crawl_due:
         reason = f"full re-crawl every {ttl:g} days"
     else:
-        outcome, reason = await etag_check(targets, settings, client)
+        outcome, reason = await etag_check(targets, client)
         if outcome != "changed":
             with SessionLocal() as session:
                 site = session.get(Site, site_id)
                 if outcome == "unchanged":
-                    _mark_success(site, settings)
+                    _mark_success(site)
                 else:
-                    _mark_failure(site, reason or "check failed", settings)
+                    _mark_failure(site, reason or "check failed")
                 session.commit()
             return outcome
 
     # 3. Re-crawl and save.
     try:
-        result = await crawl(url, settings, client)
-        if result.stop_reason == "errors":
-            raise CrawlError("too many errors during the crawl")
+        result = await crawl(url, client)
     except CrawlError as e:
         with SessionLocal() as session:
-            _mark_failure(session.get(Site, site_id), str(e), settings)
+            _mark_failure(session.get(Site, site_id), str(e))
             session.commit()
         return "failed"
 
     with SessionLocal() as session:
         site = session.get(Site, site_id)
-        changed, summary = save_crawl(session, site, result, settings)
-        _mark_success(site, settings)
+        changed, summary = save_crawl(session, site, result)
+        _mark_success(site)
         session.commit()
     log.info("Re-crawled %s (%s): %s", url, reason, summary or "no change in llms.txt")
     return "changed" if changed else "unchanged"
@@ -306,29 +267,27 @@ async def _process(site_id: str, force: bool, settings: Settings, client: httpx.
 
 # ---------- scheduler ----------
 
-async def tick(settings: Settings | None = None) -> None:
+async def tick() -> None:
     """Process sites whose next check is due."""
-    settings = settings or get_settings()
     with SessionLocal() as session:
         due = session.scalars(
             select(Site.id)
             .where(Site.status != "paused", Site.next_check_at <= utcnow())
             .order_by(Site.next_check_at)
-            .limit(settings.monitor_sites_per_tick)
+            .limit(config.MONITOR_SITES_PER_TICK)
         ).all()
     for site_id in due:
         try:
-            outcome = await process_site(site_id, settings=settings)
+            outcome = await process_site(site_id)
             log.info("Checked site %s: %s", site_id, outcome)
         except Exception:
             log.exception("Monitoring site %s failed", site_id)
 
 
-def start_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
-    settings = settings or get_settings()
+def start_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=timezone.utc)
     scheduler.add_job(
-        tick, "interval", minutes=settings.monitor_tick_minutes, max_instances=1, coalesce=True,
+        tick, "interval", minutes=config.MONITOR_TICK_MINUTES, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=10),
     )
     scheduler.start()

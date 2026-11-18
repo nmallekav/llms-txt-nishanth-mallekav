@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
+from app import config
 from app.crawler import CrawlError, crawl
-from app.markdown import markdown_candidates
 from app.sitemaps import parse_sitemap
 from tests.conftest import FakeSite, html
 
@@ -43,16 +43,16 @@ def site() -> FakeSite:
     })
 
 
-def run(fake: FakeSite, settings, url="https://acme.test/"):
+def run(fake: FakeSite, url="https://acme.test/"):
     async def go():
         async with fake.client() as client:
-            return await crawl(url, settings, client)
+            return await crawl(url, client)
     return asyncio.run(go())
 
 
-def test_crawl_finds_pages_and_respects_rules(settings):
+def test_crawl_finds_pages_and_respects_rules():
     fake = site()
-    result = run(fake, settings)
+    result = run(fake)
     found = {p.url for p in result.pages}
 
     assert result.site_name == "Acme"
@@ -69,69 +69,64 @@ def test_crawl_finds_pages_and_respects_rules(settings):
     assert result.sitemap_url_count == 1  # /secret/page is blocked by robots.txt
 
 
-def test_titles_have_site_name_stripped(settings):
-    pages = {p.url: p for p in run(site(), settings).pages}
+def test_titles_have_site_name_stripped():
+    pages = {p.url: p for p in run(site()).pages}
     assert pages["https://acme.test/pricing"].title == "Pricing"
 
 
-def test_depth_limit(settings):
-    found = {p.url for p in run(site(), settings.model_copy(update={"crawl_max_depth": 2})).pages}
+def test_depth_limit(monkeypatch):
+    monkeypatch.setattr(config, "CRAWL_MAX_DEPTH", 2)
+    found = {p.url for p in run(site()).pages}
     assert "https://acme.test/docs/api" in found
     assert "https://acme.test/docs/api/deep" not in found
 
 
-def test_max_pages_keeps_highest_scoring(settings):
-    result = run(site(), settings.model_copy(update={"crawl_max_pages": 3}))
+def test_max_pages_keeps_highest_scoring(monkeypatch):
+    monkeypatch.setattr(config, "CRAWL_MAX_PAGES", 3)
+    result = run(site())
     assert result.stop_reason == "max_pages"
     found = {p.url for p in result.pages}
     # Homepage, then nav links (Docs, Pricing) beat body, footer and sitemap links.
     assert found == {"https://acme.test/", "https://acme.test/docs", "https://acme.test/pricing"}
 
 
-def test_scope_limits_to_subpath(settings):
-    found = {p.url for p in run(site(), settings, url="https://acme.test/docs").pages}
+def test_scope_limits_to_subpath():
+    found = {p.url for p in run(site(), url="https://acme.test/docs").pages}
     assert found and all(u.startswith("https://acme.test/docs") for u in found)
 
 
-def test_homepage_failure_raises(settings):
+def test_homepage_failure_raises():
     fake = FakeSite({"/": (500, "text/html", "boom")})
     with pytest.raises(CrawlError, match="HTTP 500"):
-        run(fake, settings)
+        run(fake)
 
 
-def test_robots_disallowing_start_raises(settings):
+def test_robots_disallowing_start_raises():
     fake = FakeSite({"/robots.txt": (200, "text/plain", "User-agent: *\nDisallow: /\n"), "/": HOME})
     with pytest.raises(CrawlError, match="robots.txt"):
-        run(fake, settings)
+        run(fake)
 
 
-def test_unknown_domain_has_a_clear_error(settings):
+def test_unknown_domain_has_a_clear_error(monkeypatch):
+    monkeypatch.setattr(config, "CRAWL_ALLOW_PRIVATE_HOSTS", False)
     with pytest.raises(CrawlError, match="Couldn't find"):
-        run(site(), settings.model_copy(update={"crawl_allow_private_hosts": False}), url="https://no-such-host.invalid/")
+        run(site(), url="https://no-such-host.invalid/")
 
 
-def test_403_pages_do_not_stop_the_crawl(settings):
+def test_403_pages_do_not_stop_the_crawl():
     fake = site()
     for i in range(8):
         fake.routes[f"/members/{i}"] = (403, "text/html", "login required")
     fake.routes["/"] = HOME.replace("</main>", "".join(f'<a href="/members/{i}">m</a>' for i in range(8)) + "</main>")
-    result = run(fake, settings)
+    result = run(fake)
     assert result.stop_reason == "queue_empty"
     assert "https://acme.test/pricing" in {p.url for p in result.pages}
 
 
-def test_private_hosts_blocked_by_default(settings):
+def test_private_hosts_blocked_by_default(monkeypatch):
+    monkeypatch.setattr(config, "CRAWL_ALLOW_PRIVATE_HOSTS", False)
     with pytest.raises(CrawlError, match="public address"):
-        run(site(), settings.model_copy(update={"crawl_allow_private_hosts": False}), url="http://localhost/")
-
-
-def test_markdown_probe(settings):
-    fake = site()
-    fake.routes["/pricing.md"] = (200, "text/markdown", "# Pricing")
-    result = run(fake, settings.model_copy(update={"crawl_probe_markdown": True}))
-    pages = {p.url: p for p in result.pages}
-    assert pages["https://acme.test/pricing"].md_url == "https://acme.test/pricing.md"
-    assert pages["https://acme.test/docs"].md_url is None
+        run(site(), url="http://localhost/")
 
 
 def test_parse_sitemap_index():
@@ -140,8 +135,3 @@ def test_parse_sitemap_index():
     assert parse_sitemap(body, 10_000) == ([], ["https://a.com/s1.xml"])
     assert parse_sitemap(b"not xml", 10_000) is None
 
-
-def test_markdown_candidates():
-    assert markdown_candidates("https://a.com/") == ["https://a.com/index.html.md", "https://a.com/index.md"]
-    assert markdown_candidates("https://a.com/x.html") == ["https://a.com/x.html.md"]
-    assert markdown_candidates("https://a.com/docs") == ["https://a.com/docs.md", "https://a.com/docs/index.html.md"]

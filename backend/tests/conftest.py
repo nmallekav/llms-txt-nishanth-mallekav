@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from app.config import Settings
+from app import config
 
 
 def html(title: str, description: str = "", body: str = "", head: str = "") -> str:
@@ -34,12 +34,13 @@ class FakeSite:
         return httpx.AsyncClient(transport=httpx.MockTransport(self.handler), follow_redirects=True)
 
 
-@pytest.fixture
-def settings() -> Settings:
-    return Settings(
-        _env_file=None,
-        database_url="sqlite://",
-        crawl_allow_private_hosts=True,
-        crawl_probe_markdown=False,
-        monitor_enabled=False,
-    )
+@pytest.fixture(autouse=True)
+def test_config(monkeypatch):
+    """Settings for every test: in-memory database, local test sites allowed, no scheduler.
+
+    A test can change another value with monkeypatch.setattr(config, "CRAWL_MAX_PAGES", 3).
+    monkeypatch puts everything back after the test.
+    """
+    monkeypatch.setattr(config, "DATABASE_URL", "sqlite://")
+    monkeypatch.setattr(config, "CRAWL_ALLOW_PRIVATE_HOSTS", True)
+    monkeypatch.setattr(config, "MONITOR_ENABLED", False)

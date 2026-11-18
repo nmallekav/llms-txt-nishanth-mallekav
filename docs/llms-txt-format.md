@@ -45,7 +45,7 @@ Hard constraints the generator enforces:
 | Summary (blockquote) | Homepage `meta description` → `og:description` → first meaningful `<p>` |
 | Link title | `og:title` → `<title>` (site-name suffix stripped) → first `<h1>` → URL path |
 | Link notes | `meta description` → `og:description` → first meaningful `<p>`; omitted if none |
-| Link URL | Markdown version if found (see [crawler.md §8](crawler.md#8-markdown-versions-of-pages)), else canonical page URL |
+| Link URL | Markdown version if the page declares one (see [crawler.md §8](crawler.md#8-markdown-versions-of-pages)), else the page URL |
 
 ## Cleaning text
 

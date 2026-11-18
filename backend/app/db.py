@@ -8,7 +8,7 @@ from sqlalchemy import JSON, Float, ForeignKey, Index, Integer, String, Text, Un
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from .config import get_settings
+from . import config
 
 
 def utcnow() -> datetime:
@@ -38,9 +38,6 @@ class Site(Base):
     summary: Mapped[str | None] = mapped_column(Text)
     # Sitemaps found in the last crawl: [{"url", "etag", "last_modified"}], re-checked by the monitor.
     sitemaps: Mapped[list] = mapped_column(JSON, default=list)
-    # From the last crawl, so a cached response can show the same stats and quality report.
-    crawl_stats: Mapped[dict | None] = mapped_column(JSON)
-    quality: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_checked_at: Mapped[datetime | None]
     last_crawled_at: Mapped[datetime | None]
@@ -77,7 +74,6 @@ class PageRow(Base):
     url: Mapped[str] = mapped_column(String)
     title: Mapped[str] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
-    alt_descriptions: Mapped[list] = mapped_column(JSON, default=list)
     md_url: Mapped[str | None] = mapped_column(String)  # markdown version of the page, if found
     section: Mapped[str] = mapped_column(String)
     score: Mapped[float] = mapped_column(Float)
@@ -111,35 +107,14 @@ _engine = None
 SessionLocal = sessionmaker(expire_on_commit=False)
 
 
-_REMOVED_PAGE_COLUMNS = ("selected", "fingerprint", "http_status", "last_fetched_at")
-
-
-def _upgrade(engine) -> None:
-    """Bring a database created by an older schema up to date."""
-    insp = inspect(engine)
-    site_columns = {c["name"] for c in insp.get_columns("sites")}
-    page_columns = {c["name"] for c in insp.get_columns("pages")}
-    with engine.begin() as conn:
-        if "sitemaps" not in site_columns:
-            conn.execute(text("ALTER TABLE sites ADD COLUMN sitemaps JSON NOT NULL DEFAULT '[]'"))
-        conn.execute(text("DROP TABLE IF EXISTS sitemaps"))
-        conn.execute(text("DROP TABLE IF EXISTS check_runs"))
-        conn.execute(text("DROP INDEX IF EXISTS idx_pages_selected"))
-        for column in _REMOVED_PAGE_COLUMNS:
-            if column in page_columns:
-                conn.execute(text(f"ALTER TABLE pages DROP COLUMN {column}"))
-        if "md_url" not in page_columns:
-            conn.execute(text("ALTER TABLE pages ADD COLUMN md_url VARCHAR"))
-        for column in ("crawl_stats", "quality"):
-            if column not in site_columns:
-                conn.execute(text(f"ALTER TABLE sites ADD COLUMN {column} JSON"))
-
-
 def init_db(url: str | None = None):
     """Create the engine and tables. Called once at startup (and by tests with sqlite://)."""
     global _engine
-    _engine = make_engine(url or get_settings().database_url)
+    _engine = make_engine(url or config.DATABASE_URL)
     Base.metadata.create_all(_engine)
-    _upgrade(_engine)
+    # pages.alt_descriptions was removed. Databases made before that still have it (NOT NULL), so drop it.
+    if "alt_descriptions" in {c["name"] for c in inspect(_engine).get_columns("pages")}:
+        with _engine.begin() as conn:
+            conn.execute(text("ALTER TABLE pages DROP COLUMN alt_descriptions"))
     SessionLocal.configure(bind=_engine)
     return _engine

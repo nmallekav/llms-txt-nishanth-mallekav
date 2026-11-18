@@ -38,7 +38,7 @@ flowchart LR
 
 ## How it works
 
-1. **Crawl:** a best-first crawl with a priority queue picks the ~50 most important
+1. **Crawl:** a best-first crawl (always fetch the highest-scoring links next) picks the ~50 most important
    pages, using sitemaps, nav links and page scores. → [docs/crawler.md](docs/crawler.md)
 2. **Extract:** pull each page's title, description and markdown version (if any).
 3. **Generate:** build a spec-compliant llms.txt (H1, summary, H2 link sections,
@@ -48,8 +48,6 @@ flowchart LR
    automatically and the new llms.txt is stored if it differs. → [docs/monitoring.md](docs/monitoring.md)
 5. **Store:** everything lives in one SQLite file: sites, version history and
    pages. → [docs/database.md](docs/database.md)
-6. **Cache:** generating a stored site checked in the last 24 hours returns the saved
-   version instantly; "Regenerate now" forces a fresh crawl.
 
 API, components and repo layout: [docs/architecture.md](docs/architecture.md)
 
@@ -76,13 +74,13 @@ check for the same name, summary, sections and key pages. → [docs/testing.md](
 ## Decisions log
 
 - Python/FastAPI/Docker backend; React + Vite frontend served from the same container.
-- Best-first crawl (priority queue) instead of plain BFS, so a page budget yields the best pages.
+- Best-first crawl (highest score first) instead of plain BFS, so a page budget yields the best pages.
 - Quality report (`quality.py`): scores each generated file out of 100 with ok/warn checks (spec, descriptions, key pages, .md links, structure, size, coverage), computed from the crawl with no extra requests.
 - Each URL is scored once, when queued (no re-scoring on pop); a 15-page cap per section keeps one section from taking the budget.
 - Links point to a page's markdown version when one exists (spec v2 recommendation).
 - Change detection compares what goes into llms.txt (titles, descriptions, page set), not raw HTML.
 - SQLite only (no Postgres): one file, no extra service. Runs as a single worker so the in-process scheduler doesn't duplicate jobs.
-- Cache: a stored site checked within `CACHE_MAX_AGE_HOURS` (24) is returned from the database instead of re-crawled; "Regenerate now" (`refresh: true`) skips it. A fresh crawl of an already-stored site updates the stored copy even if "monitor" isn't ticked.
+- Every generate request crawls fresh. A fresh crawl of an already-stored site updates the stored copy even if "monitor" isn't ticked.
 - Change detection = ETag check (interval configurable, default 24h) on homepage, sitemaps and listed pages. Any change triggers a full re-crawl; a new version is saved only if the file hash differs.
 - URLs with no ETag or Last-Modified count as changed (correct, just not cheap). A 7-day full crawl (configurable) backstops what ETags can't see.
 - Fresh git repo for this project (the current repo root is the home folder).

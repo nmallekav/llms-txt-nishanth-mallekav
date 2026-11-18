@@ -25,7 +25,6 @@ flowchart LR
     CR --> EX[extract.py]
     CR --> SC[scoring.py]
     CR --> SM[sitemaps.py]
-    CR --> MD[markdown.py]
     CR --> UR[urls.py]
     MON -->|re-crawl| CR
     MON -->|render| GEN
@@ -34,7 +33,7 @@ flowchart LR
 
     classDef helper fill:#FAEEDA,stroke:#BA7517,color:#633806
     classDef report fill:#E1F5EE,stroke:#0F6E56,color:#085041
-    class FE,SC,SM,MD helper
+    class FE,SC,SM helper
     class QU report
 ```
 
@@ -53,23 +52,19 @@ The whole app end to end, without splitting it by file.
 
 **Generate a file (user clicks Generate):**
 - User enters a URL (and optionally ticks "keep it up to date")
-- If the site is already stored and was checked in the last 24 hours (and the user didn't click "Regenerate now"):
-  - return the saved file, stats and quality report instantly; done
-- Otherwise crawl it now:
 - Clean up the URL; refuse it if it's invalid or points to a private/internal address
 - Read the site's robots.txt (no robots.txt = everything allowed):
   - stop if it blocks the URL we were given
   - keep its rules: every link and sitemap URL is checked against them before it's queued
-  - keep its `Crawl-delay`: if set, fetch one page at a time and wait between requests
-  - keep its `Sitemap:` lines (if none, try `/sitemap.xml` and `/sitemap_index.xml`)
+  - keep its `Sitemap:` lines (if none, try `/sitemap.xml`)
 - Fetch the homepage; stop with an error if it fails
-- If the homepage redirected, follow it to the new host/path (and read the new host's robots.txt)
+- If the homepage redirected, continue from the new host/path
 - Read the site name and summary from the homepage
-- Seed a priority queue:
+- Collect candidate URLs, each with a score:
   - every link on the homepage (menu links score highest)
   - every URL in the site's sitemaps
-- Loop until 50 pages, 45 seconds, too many errors, or the queue is empty:
-  - take the highest-scoring URLs off the queue
+- Loop until 50 pages, 45 seconds, or no candidates are left:
+  - take the 5 highest-scoring candidates
   - fetch them in parallel
   - for each page:
     - skip it if it's not HTML, a duplicate, or marked noindex
@@ -80,7 +75,7 @@ The whole app end to end, without splitting it by file.
       - else the first real paragraph on the page
       - else no description
     - save its ETag (used later to check if the page changed)
-    - score its links and add them to the queue
+    - score its links and add them to the candidates
 - Look for markdown (.md) versions of the saved pages
 - Build the llms.txt:
   - `# site name`
@@ -159,12 +154,10 @@ Each section lists the high-level steps of what happens; see the code for detail
   1. Open the SQLite database **→ `db.init_db()`**
   2. Start the daily scheduler **→ `monitor.start_scheduler()`**
 - **Generate request** (`POST /api/generate`):
-  1. If the site is stored and was checked in the last 24 hours, return the saved version instantly **→ `monitor.cached_site()`**
-     (skipped when the user clicks "Regenerate now", which sends `refresh: true`)
-  2. Otherwise crawl the site and build the file **→ `generate.generate()`**
-  3. If the site can't be crawled, return the error message to the UI.
-  4. If "keep it up to date" is ticked, or the site is already stored, save it **→ `monitor.store_site()`**
-  5. Return the llms.txt, crawl stats, quality report, whether it came from the cache, and the stable link if monitored.
+  1. Crawl the site and build the file **→ `generate.generate()`**
+  2. If the site can't be crawled, return the error message to the UI.
+  3. If "keep it up to date" is ticked, or the site is already stored, save it **→ `monitor.store_site()`**
+  4. Return the llms.txt, crawl stats, quality report, and the stable link if monitored.
 - **Stable link** (`GET /s/{id}/llms.txt`): look up the site and return its latest llms.txt **→ `db`**
 - **Everything else:** serve the React app.
 
@@ -183,15 +176,14 @@ Each section lists the high-level steps of what happens; see the code for detail
 3. Fetch the homepage **→ `fetcher.fetch()`**; stop with an error if it fails.
 4. If the homepage redirected, switch to the new host/path.
 5. Read the homepage and save it as the first page **→ `extract.parse_html()`**
-6. Queue every homepage link, each with a score **→ `scoring.score()`**
-7. Queue every URL from the sitemaps **→ `sitemaps.parse_sitemap()`**
-8. **Loop** until 50 pages, 45 seconds, too many errors, or nothing left to fetch:
-   - take the best ~5 URLs off the queue (skipping sections that already have 15 pages)
-   - fetch them in parallel
+6. Collect every homepage link as a candidate, each with a score **→ `scoring.score()`**
+7. Collect every URL from the sitemap **→ `sitemaps.parse_sitemap()`**
+8. **Loop** until 50 pages, 45 seconds, or no candidates are left:
+   - take the 5 highest-scoring candidates
+   - fetch them in parallel; skip any that fail
    - for each page: skip non-HTML pages, duplicates and `noindex` pages; save the title,
-     description and ETag; score its links and add them to the queue
-9. Look for `.md` versions of the saved pages **→ `markdown.find_markdown_versions()`**
-10. Return the pages, the sitemaps, the ETags and why the crawl stopped.
+     description and ETag; score its links and add them to the candidates
+9. Return the pages, the sitemaps, the ETags and why the crawl stopped.
 
 The crawler uses these helpers:
 
@@ -213,7 +205,7 @@ The crawler uses these helpers:
 
 1. Read the titles (`<title>`, `og:title`, `<h1>`).
 2. Read the descriptions (meta description, `og:description`, first paragraph).
-3. Read the site name, canonical URL, markdown link and `noindex` flag.
+3. Read the site name, markdown link and `noindex` flag.
 4. Collect every link and note where it appeared: nav, footer or body.
 5. Clean up titles: "Home | Acme" → "Acme", "Pricing | Acme" → "Pricing".
 
@@ -223,7 +215,7 @@ The crawler uses these helpers:
 - If missing: `<meta property="og:description">`, the text used for link previews on Slack, LinkedIn or X.
 - If missing: the first real paragraph on the page (40+ characters, not in the menu or footer).
 - If none exist: the link has no description, which the spec allows.
-- If 3+ pages share the same description, it's a site-wide default, so those pages use their next option instead (handled in `llmstxt.py`).
+- If 3+ pages share the same description, it's a site-wide default, so it's left out for those pages (handled in `llmstxt.py`).
 
 #### `sitemaps.py`: read a sitemap
 
@@ -236,7 +228,7 @@ The crawler uses these helpers:
 2. Add points for each extra page linking to it, and for keywords like `docs` or `pricing`.
 3. Subtract points for being deep, and for being in a section we already have many pages from.
 
-Each URL is scored once, when it's added to the queue. The rules (weights can be changed in `.env`):
+Each URL is scored when it's found, and re-scored if it's found again. The rules (weights can be changed in `.env`):
 
 | Rule | Points | Setting |
 |---|---|---|
@@ -248,22 +240,17 @@ Each URL is scored once, when it's added to the queue. The rules (weights can be
 | Each extra page linking to it | +3 | `SCORE_INBOUND` |
 | Path has a keyword: `docs`, `documentation`, `guide(s)`, `api`, `getting-started`, `quickstart`, `reference`, `about`, `pricing`, `product(s)`, `features`, `faq` | +20 | `SCORE_KEYWORD` |
 | Each folder level deep (`/a/b/c` = 3) | −8 each | `SCORE_DEPTH_PENALTY` |
-| Each page already taken from its section | −5 each | `SCORE_SECTION_PENALTY` |
+| Each page already saved from its section | −5 each | `SCORE_SECTION_PENALTY` |
 
 - Each link location counts once: 10 body links give +10, plus +3 for each extra page.
 - The nav bonus only counts for links on the homepage, since the menu repeats on every page.
 - The homepage itself isn't scored; it's always the first page.
 
-#### `markdown.py`: find `.md` versions
-
-1. For each saved page without a declared markdown version, try the usual URLs (`page.md`, `index.html.md`).
-2. If one exists, link to it instead of the HTML page.
-
 ### `llmstxt.py`: build and check the file
 
 **Build:**
 1. Drop the homepage (its name and summary become the H1 and blockquote).
-2. Replace descriptions shared by 3+ pages with each page's next option (`og:description` or first paragraph).
+2. Remove descriptions shared by 3+ pages (a site-wide default, not a real description).
 3. Remove duplicate pages.
 4. Put legal/careers pages aside for `## Optional`.
 5. Group the rest into sections: Main, one section per folder, Other for single pages.
@@ -296,13 +283,7 @@ Runs after the file is built, using the crawl result and the text. No extra requ
 **When a user turns on monitoring:**
 1. Find or create the site in the database **→ `db`**
 2. Build the llms.txt **→ `generate.render()`**, then save the pages, ETags and first version.
-3. Save the crawl stats and quality report too, so a cached response can show them.
-4. Schedule its next check for 24 hours later.
-
-**When someone generates a stored site again** (`cached_site()`):
-1. Look the site up by its URL **→ `db`**
-2. If it was checked in the last 24 hours (`CACHE_MAX_AGE_HOURS`), hand back the saved version.
-3. Otherwise return nothing, so `main.py` crawls fresh.
+3. Schedule its next check for 24 hours later.
 
 **Every 15 minutes (scheduler):**
 1. Find the sites whose next check is due **→ `db`**
@@ -322,18 +303,15 @@ Runs after the file is built, using the crawl result and the text. No extra requ
   - `sites`: one row per monitored site, with its check schedule and ETags
   - `site_versions`: every llms.txt generated for a site
   - `pages`: the pages from the latest crawl, with their ETags
-- On startup: create the tables, upgrade older databases, and turn on SQLite settings
+- On startup: create the tables and turn on SQLite settings
   (WAL mode, foreign keys, busy timeout).
 
 ### `config.py`: settings
 
-- Holds every tunable number: crawl limits, scoring weights, monitoring intervals, database path.
-- Each one can be changed in `.env` or with an environment variable.
-
-### `cli.py`: command line
-
-1. Crawl and build for the URL given on the command line **→ `generate.generate()`**
-2. Print the llms.txt (or save it to a file) and a short summary of the crawl.
+- Holds every tunable number as a plain constant: crawl limits, scoring weights, monitoring intervals, database path.
+- Each one is read from an environment variable of the same name when the app starts, e.g.
+  `CRAWL_MAX_PAGES = int(os.environ.get("CRAWL_MAX_PAGES", 50))`. Locally, `.env` is loaded into the environment first.
+- Other modules use them as `config.CRAWL_MAX_PAGES`.
 
 ### Frontend: `App.tsx`
 

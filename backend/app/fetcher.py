@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from .config import Settings
+from . import config
 
 HTML_TYPES = ("text/html", "application/xhtml+xml")
 
@@ -37,30 +37,29 @@ class FetchResult:
     def is_html(self) -> bool:
         return self.content_type in HTML_TYPES
 
-    @property
-    def transient(self) -> bool:
-        """An error that may go away on retry (as opposed to a page that is really gone)."""
-        return self.error in ("timeout", "network") or self.status >= 500 or self.status == 429
-
 
 def content_type(headers: httpx.Headers) -> str:
     """'text/html; charset=utf-8' -> 'text/html'."""
     return headers.get("content-type", "").split(";")[0].strip().lower()
 
 
-def make_client(settings: Settings) -> httpx.AsyncClient:
+def make_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
         follow_redirects=True,
-        max_redirects=settings.crawl_max_redirects,
-        timeout=settings.crawl_request_timeout_seconds,
-        headers={"User-Agent": settings.crawl_user_agent, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"},
+        max_redirects=config.CRAWL_MAX_REDIRECTS,
+        timeout=config.CRAWL_REQUEST_TIMEOUT_SECONDS,
+        headers={"User-Agent": config.CRAWL_USER_AGENT, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"},
     )
 
 
-async def fetch(client: httpx.AsyncClient, url: str, timeout: float, max_bytes: int) -> FetchResult:
-    """GET a URL. Only downloads the body for HTML, XML, text and gzip responses, up to max_bytes."""
+async def fetch(client: httpx.AsyncClient, url: str) -> FetchResult:
+    """GET a URL. Only downloads the body for HTML, XML, text and gzip responses, up to CRAWL_MAX_BODY_BYTES.
+
+    The per-request timeout comes from the client (make_client sets CRAWL_REQUEST_TIMEOUT_SECONDS).
+    """
+    max_bytes = config.CRAWL_MAX_BODY_BYTES
     try:
-        async with client.stream("GET", url, timeout=timeout) as r:
+        async with client.stream("GET", url) as r:
             result = FetchResult(str(r.url), r.status_code, r.headers)
             if r.status_code != 200:
                 return result

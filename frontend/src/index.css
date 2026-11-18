@@ -109,19 +109,6 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   overflow-wrap: anywhere;
 }
 .error { background: var(--error-bg); color: var(--error-text); }
-.cached {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 16px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: var(--code-bg);
-  color: var(--muted);
-}
-.cached button { background: transparent; color: var(--accent); padding: 6px 12px; }
 .warning { background: var(--warn-bg); color: var(--warn-text); }
 .stable { background: var(--ok-bg); color: var(--ok-text); }
 

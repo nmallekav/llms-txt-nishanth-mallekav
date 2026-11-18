@@ -2,7 +2,7 @@ export interface CrawlStats {
   pages: number
   sitemaps: number
   duration_seconds: number
-  stop_reason: 'max_pages' | 'queue_empty' | 'time' | 'errors'
+  stop_reason: 'max_pages' | 'queue_empty' | 'time'
   partial: boolean
 }
 
@@ -25,16 +25,13 @@ export interface GenerateResponse {
   quality: Quality
   site_id: string | null
   stable_url: string | null
-  cached: boolean
-  crawled_at: string
-  checked_at: string | null
 }
 
-export async function generate(url: string, monitor: boolean, refresh = false): Promise<GenerateResponse> {
+export async function generate(url: string, monitor: boolean): Promise<GenerateResponse> {
   const res = await fetch('/api/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, monitor, refresh }),
+    body: JSON.stringify({ url, monitor }),
   })
   if (!res.ok) {
     const body = await res.json().catch(() => null)

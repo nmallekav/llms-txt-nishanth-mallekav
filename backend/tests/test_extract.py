@@ -6,7 +6,6 @@ PAGE = """
   <meta name="description" content="  Plans for
      every team. ">
   <meta property="og:site_name" content="Acme">
-  <link rel="canonical" href="/pricing">
   <link rel="alternate" type="text/markdown" href="/pricing.md">
 </head><body>
   <header><nav><a href="/docs">Docs</a></nav></header>
@@ -27,7 +26,6 @@ def test_parse_html_metadata():
     assert meta.title == "Pricing | Acme"
     assert meta.description == "Plans for every team."
     assert meta.site_name == "Acme"
-    assert meta.canonical == "/pricing"
     assert meta.md_alternate == "/pricing.md"
     assert meta.h1 == "Pricing"
     assert meta.first_paragraph.startswith("This is the first paragraph")
@@ -44,9 +42,10 @@ def test_noindex():
     assert meta.noindex
 
 
-def test_description_candidates_skip_duplicates():
-    meta = extract.PageMeta(description="A", og_description="A", first_paragraph="B")
-    assert meta.descriptions == ["A", "B"]
+def test_best_description_falls_back_in_order():
+    assert extract.PageMeta(description="A", og_description="B", first_paragraph="C").best_description == "A"
+    assert extract.PageMeta(og_description="B", first_paragraph="C").best_description == "B"
+    assert extract.PageMeta(first_paragraph="C").best_description == "C"
 
 
 def test_site_name_from_title():

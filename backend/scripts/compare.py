@@ -16,7 +16,6 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import llmstxt, urls  # noqa: E402
-from app.config import get_settings  # noqa: E402
 from app.crawler import CrawlError  # noqa: E402
 from app.fetcher import make_client  # noqa: E402
 from app.generate import generate  # noqa: E402
@@ -43,7 +42,7 @@ def _key(url: str) -> str:
 async def published_llms_txt(site: str) -> str | None:
     parts = httpx.URL(urls.ensure_scheme(site))
     path = parts.path.rstrip("/")
-    async with make_client(get_settings()) as client:
+    async with make_client() as client:
         for candidate in (f"{parts.scheme}://{parts.host}{path}/llms.txt", f"{parts.scheme}://{parts.host}/llms.txt"):
             r = await client.get(candidate)
             if r.status_code == 200 and "html" not in r.headers.get("content-type", ""):
